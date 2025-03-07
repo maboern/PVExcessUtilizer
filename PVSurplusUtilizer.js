@@ -94,6 +94,9 @@ var LOAD_BOILER_SWITCH = 'modbus.2.coils.0_DO-00';
 var load_boiler_runtime_secs = 0;
 var load_boiler_day_energy = 0;
 
+let pv_system = new PVSystem('Turnerweg');
+console.log(pv_system.getDetails());
+
 function getRecentStateVal(obj) {
     var state = getState(obj);
     if(state.ts >= (Date.now() - SCRIPT_MAX_VALUE_AGE)) {
@@ -283,15 +286,13 @@ function controlLoads(available_excess_power) {
     available_power += (boiler_on ? load_boiler_power : 0);
     
     if(boiler_connected) {
-        if(available_power >= LOAD_BOILER_EXPECTED_POWER_WATTS + SCRIPT_LOAD_HISTERESYS_WATTS) {
+        if(available_power >= LOAD_BOILER_EXPECTED_POWER_WATTS) {
             if(!boiler_on && available_power > LOAD_BOILER_EXPECTED_POWER_WATTS + SCRIPT_LOAD_HISTERESYS_WATTS) {
                 startBoiler(available_power);
                 load_boiler_power = LOAD_BOILER_EXPECTED_POWER_WATTS;
             }
-        } else {
-            if(boiler_on) {
-                stopBoiler(available_power);
-            }
+        } else if(boiler_on && available_power < LOAD_BOILER_EXPECTED_POWER_WATTS - SCRIPT_LOAD_HISTERESYS_WATTS) {
+            stopBoiler(available_power);
         }
         cur_total_load_power += load_boiler_power;
         available_power -= load_boiler_power;
@@ -303,10 +304,8 @@ function controlLoads(available_excess_power) {
                 startCellarHeater(available_power);
                 load_cellar_heater_power = LOAD_SHELLY_CELLAR_HEATER_EXPECTED_POWER_WATTS;
             } 
-        } else {
-            if(cellar_heater_on) {
+        } else if(cellar_heater_on && available_power < LOAD_SHELLY_CELLAR_HEATER_EXPECTED_POWER_WATTS - SCRIPT_LOAD_HISTERESYS_WATTS) {
                 stopCellarHeater(available_power);
-            }
         } 
         cur_total_load_power += load_cellar_heater_power;
         available_power -= load_cellar_heater_power;
@@ -327,4 +326,4 @@ function processing() {
 var Interval = setInterval(function () {
   processing(); /*start processing in interval*/
 }, (SCRIPT_UPDATE_INTERVAL_SEC*1000));
-    
+
