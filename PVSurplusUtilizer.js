@@ -235,3 +235,7 @@ var Interval = setInterval(function () {
   processing(); /*start processing in interval*/
 }, (SCRIPT_UPDATE_INTERVAL_SEC*1000));
 
+var PVInterval = setInterval(function () {
+  pv.process(); /*start processing in interval*/
+}, (pv.getUpdateIntervalMs()));
+
