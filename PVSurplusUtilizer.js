@@ -227,7 +227,7 @@ function controlLoads(available_excess_power) {
 function processing() {
     if(!checkReady()) { return; }
 
-    var available_excess_power = pv.updatePVProduction();
+    var available_excess_power = pv.update();
     controlLoads(available_excess_power);
 }
 

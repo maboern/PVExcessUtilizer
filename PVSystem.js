@@ -26,15 +26,19 @@ class PVSystem {
         // Static PV System Parameters
         this.PV_PEAK_POWER_WATTS = 16400;
         this.PV_GRID_FEEDIN_MAX_WATTS = 13200;
-        this.PV_GRID_FEEDIN_TOLERANCE = 250;
         this.PV_TOTAL_NR_PV_PANELS = this.INV15_NR_PV_PANELS + this.INV10_NR_PV_PANELS;
         this.PV_PANEL_POWER_WATTS = 440;
         this.PV_MANAGER_CONNECTED = 'sma-em.0.info.connection';
         this.PV_GRID_FEEDIN_OBJ = 'sma-em.0.3014001810.psurplus';
 
+        // Configuration
+        this.PV_GRID_FEEDIN_TOLERANCE = 250;
+        this.PV_MAX_DYNAMICS = 0.05;
+
         this.pv_power = 0;
         this.pv_power_max = 0;
         this.pv_power_min = 0;
+        this.pv_power_estimate = 0;
         this.feedin_power = 0;
         this.feedin_power_max = 0;
         this.feedin_power_min = 0;
@@ -108,34 +112,63 @@ class PVSystem {
         this.feedin_power_min = this.feedin_power;
     }
 
-    predictGeneration() {
+    fadeGenerationMax() {
+        if(this.pv_power_max > this.pv_power_estimate) {
+            this.pv_power_fading_max = this.pv_power_max;;
+        } else {
+            var old_fading_max = this.pv_power_fading_max
+            this.pv_power_fading_max = old_fading_max + (this.pv_power_max - old_fading_max)*this.PV_MAX_DYNAMICS;
+        }
+        return this.pv_power_fading_max;
+    }
+
+    isCurtailed() {
+        if(this.feedin_power_max > this.PV_GRID_FEEDIN_MAX_WATTS - this.PV_GRID_FEEDIN_TOLERANCE) {
+            return true;
+        } 
+        return false;
+    }
+
+    estimateGeneration() {
         this.updateShading();
+        this.fadeGenerationMax();
+
         var pv_forecast = getState(this.PV_FORECAST_POWER_NOW_OBJ).val;
         pv_forecast -= this.pv_shading;
 
-        if(this.feedin_power_max < this.PV_GRID_FEEDIN_MAX_WATTS - this.PV_GRID_FEEDIN_TOLERANCE) {
-            // Generation not curtailed because feed-in limit not reached
-            return this.pv_power;
-        } else if(this.pv_power_max > pv_forecast) {
-            // We have observed higher PV power in the last period - so we know we can at least produce that
-            return this.pv_power_max;
+        var estimate = pv_forecast;
+        if(this.isCurtailed()) {
+            // We are being curtailed
+            if(this.pv_power_max > pv_forecast) {
+                // We have observed higher PV power in this period - so we know we can at least produce that
+                estimate = this.pv_power_max;
+            }
+            if(this.pv_power_fading_max > estimate) {
+                // We have observed higher PV power earlier, but faded by time since then. 
+                // We trust it more than the current forecast or max if it is higher.
+                estimate = this.pv_power_fading_max;
+            }
         } else {
-            return pv_forecast;
+            // Generation not curtailed because feed-in limit not reached
+            estimate = this.pv_power;
         }
+
+        this.pv_power_estimate = estimate;
+        return estimate;
     }
 
-    updatePVProduction() {
+    update() {
         setState(this.SCRIPT_PV_FEEDIN_WATTS_OBJ, this.feedin_power, true);
         setState(this.SCRIPT_PV_CUR_WATTS_OBJ, this.pv_power, true);
         setState(this.SCRIPT_PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ, this.pv_feedin_limit_deviation, true);
         setState(this.SCRIPT_PV_SELF_CONSUMPTION_WATTS_OBJ, this.self_consumption, true);
 
-        var prediction = this.predictGeneration();
+        var estimate = this.estimateGeneration();
 
         var pv_forecasted_surplus = 0;
         var unused_excess_power = 0;
-        if(prediction > this.pv_power && this.pv_power >= this.PV_GRID_FEEDIN_MAX_WATTS) {
-            pv_forecasted_surplus = prediction - this.pv_power;
+        if(estimate > this.pv_power && this.pv_power >= this.PV_GRID_FEEDIN_MAX_WATTS) {
+            pv_forecasted_surplus = estimate - this.pv_power;
             unused_excess_power = pv_forecasted_surplus + this.pv_feedin_limit_deviation;
         } 
         setState(this.SCRIPT_PV_FORECASTED_SURPLUS_WATTS_OBJ, pv_forecasted_surplus, true);
