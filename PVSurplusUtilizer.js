@@ -181,6 +181,10 @@ function controlLoads(available_excess_power) {
             if(non_load_consumption > 0) {
                 load_boiler_power = LOAD_BOILER_EXPECTED_POWER_WATTS;
             } else {
+                // As there is not enough consumption, the heating element in the boiler
+                // has probably turned itself off because it has reached its target temperature
+                // From experiments, the heating element consumes power unequally as follows from 
+                // the shared power circuit: L1: 1.08kW, L2: 1.07kW, L3: 2.15kW
                 stopBoiler(available_excess_power - load_cellar_heater_power);
                 load_boiler_power = 0;
                 boiler_on = false;
@@ -224,7 +228,7 @@ function controlLoads(available_excess_power) {
     resetDayValuesIfNecessary();
 }
 
-function processing() {
+function updateControl() {
     if(!checkReady()) { return; }
 
     var available_excess_power = pv.update();
@@ -232,10 +236,10 @@ function processing() {
 }
 
 var Interval = setInterval(function () {
-  processing(); /*start processing in interval*/
+  updateControl(); /*start processing in interval*/
 }, (SCRIPT_UPDATE_INTERVAL_SEC*1000));
 
 var PVInterval = setInterval(function () {
-  pv.process(); /*start processing in interval*/
+  pv.processMeasurements(); /*start processing in interval*/
 }, (pv.getUpdateIntervalMs()));
 
