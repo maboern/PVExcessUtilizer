@@ -184,8 +184,8 @@ class PVSystem {
         this.pv_excess_power = unused_potential_power + this.pv_feedin_limit_deviation;
 
         // For the sake of graphing, we floor the excess power at 0
-        var pv_available_excess_watts = this.pv_excess_power > 0 ? this.pv_excess_power : 0;
-        setState(this.SCRIPT_PV_AVAILABLE_EXCESS_WATTS_OBJ, pv_available_excess_watts, true);
+        var pv_available_excess_power = this.pv_excess_power > 0 ? this.pv_excess_power : 0;
+        setState(this.SCRIPT_PV_AVAILABLE_EXCESS_WATTS_OBJ, pv_available_excess_power, true);
 
        // TODO: Calculate real available excess power including controlled load power (Object oriented)
 

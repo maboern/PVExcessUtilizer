@@ -231,15 +231,15 @@ function controlLoads(available_excess_power) {
 function updateControl() {
     if(!checkReady()) { return; }
 
-    var available_excess_power = pv.update();
+    var available_excess_power = pv.updateEstimation();
     controlLoads(available_excess_power);
 }
 
 var Interval = setInterval(function () {
-  updateControl(); /*start processing in interval*/
+  updateControl(); // start processing in interval
 }, (SCRIPT_UPDATE_INTERVAL_SEC*1000));
 
 var PVInterval = setInterval(function () {
-  pv.processMeasurements(); /*start processing in interval*/
+  pv.processMeasurements(); // start processing in interval
 }, (pv.getUpdateIntervalMs()));
 
