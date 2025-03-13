@@ -2,7 +2,7 @@
 var SCRIPT_UPDATE_INTERVAL_SEC = 30;
 var SCRIPT_MAX_VALUE_AGE = 60 * 1000;
 var SCRIPT_LOAD_HISTERESYS_WATTS = 250;
-var SCRIPT_DEBUG = true;
+var SCRIPT_DEBUG = false;
 var scriptRunTimeSecs = 0;
 var SCRIPT_ID = 'javascript.0';
 
@@ -48,6 +48,8 @@ var load_boiler_day_energy = 0;
 
 let pv = new PVSystem('Turnerweg');
 console.log(pv.getDetails());
+
+let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000);
 
 function getRecentStateVal(obj) {
     var state = getState(obj);
@@ -197,6 +199,10 @@ function controlLoads(available_excess_power) {
     available_power += (cellar_heater_on ? load_cellar_heater_power : 0);
     available_power += (boiler_on ? load_boiler_power : 0);
     
+    if(SCRIPT_DEBUG) {
+        console.log("Excess: " + available_excess_power + "W; Available: " + available_power + "W");
+    }
+
     if(boiler_connected) {
         if(available_power >= LOAD_BOILER_EXPECTED_POWER_WATTS) {
             if(!boiler_on && available_power > LOAD_BOILER_EXPECTED_POWER_WATTS + SCRIPT_LOAD_HISTERESYS_WATTS) {
@@ -231,8 +237,8 @@ function controlLoads(available_excess_power) {
 function updateControl() {
     if(!checkReady()) { return; }
 
-    var available_excess_power = pv.updateEstimation();
-    controlLoads(available_excess_power);
+    pv.updateEstimation();
+    controlLoads(pv.getExcessPower());
 }
 
 var Interval = setInterval(function () {
