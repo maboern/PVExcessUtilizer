@@ -38,6 +38,8 @@ class PVSystem {
         this.PV_GRID_FEEDIN_TOLERANCE = 250;
         this.PV_MAX_DYNAMICS = 0.05;
 
+        this.mppt = new MpptCurtailmentEstimator(this.SCRIPT_ID, this.INV15_VOLTAGE_B_OBJ, this.INV15_NR_PV_PANELS_B);
+        
         this.pv_power = 0;
         this.pv_power_max = 0;
         this.pv_power_min = 0;
@@ -71,23 +73,6 @@ class PVSystem {
         createState(this.SCRIPT_PV_SELF_CONSUMPTION_WATTS_OBJ, 0, {read: true, write: false, name: "pvSelfConsumptionPower", type: "number", unit: "W", def: 0});
         this.SCRIPT_PV_ESTIMATE_WATTS_OBJ = this.SCRIPT_ID + ".info.pv_generation_estimate_watts";
         createState(this.SCRIPT_PV_ESTIMATE_WATTS_OBJ, 0, {read: true, write: false, name: "pvGenerationEstimatePower", type: "number", unit: "W", def: 0});
-
-
-        // Curtailment estimate from MPTT tracking / Panel voltage
-        this.pv_panel_voltage = 0;
-        this.pv_curtailment_estimate = 0;
-        this.pv_mptt_power_estimate = 0;
-        this.pv_uncurtailed_panel_voltage = 0;
-        this.pv_panel_voltage_power_bucket = [];
-
-        this.SCRIPT_PV_CURTAILMENT_ESTIMATE_OBJ = this.SCRIPT_ID + ".info.pv_curtailment_estimate";
-        createState(this.SCRIPT_PV_CURTAILMENT_ESTIMATE_OBJ, 0, {read: true, write: false, name: "pvCurtailmentEstimate", type: "number", unit: "%", def: 0});
-        this.SCRIPT_PV_MPTT_POWER_ESTIMATE_OBJ = this.SCRIPT_ID + ".info.pv_mptt_power_estimate";
-        createState(this.SCRIPT_PV_MPTT_POWER_ESTIMATE_OBJ, 0, {read: true, write: false, name: "pvMPTTTrackingPowerEstimate", type: "number", unit: "W", def: 0});
-        this.SCRIPT_PV_PANEL_VOLTAGE_POWER_BUCKET_OBJ_PREFIX = this.SCRIPT_ID + ".info.panel_voltage_buckets.power_";
-        for(var power_bucket = 0; power_bucket <= 25; power_bucket++) {
-            createState(this.SCRIPT_PV_PANEL_VOLTAGE_POWER_BUCKET_OBJ_PREFIX + power_bucket, 0, {read: true, write: false, name: "pvPanelVoltagePowerBucket_" + power_bucket, type: "number", unit: "V", def: 0});
-        }
 
         console.log(`Initialized PV System ${this.name} (${this.PV_PEAK_POWER_WATTS} Wp).`)
     }
@@ -161,33 +146,6 @@ class PVSystem {
         return false;
     }
 
-    estimateCurtailment() {
-        if(this.isCurtailed()) {
-            var mptt_voltage_offset = this.pv_panel_voltage - this.pv_uncurtailed_panel_voltage;
-            mptt_voltage_offset = mptt_voltage_offset > 0 ? mptt_voltage_offset : 0;
-            if(mptt_voltage_offset < 1) {
-                // Voltage within error margin around peak power - assume no curtailment
-                this.pv_curtailment_estimate = 0;
-            } else if(mptt_voltage_offset <= 3.5) {
-                // Power curve estimation near the peak power (offset < 3.5V) is -3.178%/V
-                this.pv_curtailment_estimate = 0.03178 * mptt_voltage_offset;
-            } else if (mptt_voltage_offset < 10) {
-                // Power curve estimation further away from peak power is -9.2%/V
-                var net_mptt_voltage_offset = mptt_voltage_offset - 3.5;
-                this.pv_curtailment_estimate = 0.08 + 0.092*net_mptt_voltage_offset;
-            } else {
-                this.pv_curtailment_estimate = 0;
-            }
-        } else {
-            this.pv_uncurtailed_panel_voltage = this.pv_panel_voltage;
-            this.pv_curtailment_estimate = 0;
-        }
-        setState(this.SCRIPT_PV_CURTAILMENT_ESTIMATE_OBJ, this.pv_curtailment_estimate * 100, true);
-
-        this.pv_mptt_power_estimate = this.pv_power / (1 - this.pv_curtailment_estimate);
-        setState(this.SCRIPT_PV_MPTT_POWER_ESTIMATE_OBJ, this.pv_mptt_power_estimate, true);
-    }
-
     estimatePotentialPower() {
         this.updateShading();
         this.fadeGenerationMax();
@@ -226,7 +184,6 @@ class PVSystem {
         setState(this.SCRIPT_PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ, this.pv_feedin_limit_deviation, true);
         setState(this.SCRIPT_PV_SELF_CONSUMPTION_WATTS_OBJ, this.self_consumption, true);
 
-        this.estimateCurtailment();
         var potential_pv_power = this.estimatePotentialPower();
 
         // The estimate guarantees that the potential is always higher than the actual
@@ -244,13 +201,13 @@ class PVSystem {
         this.pv_available_excess_power = this.pv_excess_power > 0 ? this.pv_excess_power : 0;
         setState(this.SCRIPT_PV_AVAILABLE_EXCESS_WATTS_OBJ, this.pv_available_excess_power, true);
 
+        this.mppt.updateEstimation(this.isCurtailed(), this.pv_power);
+
        // TODO: Calculate real available excess power including controlled load power (Object oriented)
+
 
         // At the end of the update we reset the min/max values for the next period
         this.restartMeasurementPeriod();
-        if(this.SCRIPT_DEBUG) {
-            this.logPowerBuckets();
-        }
     }
     
     max(value, prev_max) {
@@ -265,45 +222,6 @@ class PVSystem {
             return value;
         }
         return prev_min;
-    }
-
-    getPowerBucket(panel_voltage) {
-        const POWER_LEVEL_THRESHOLD = 100; // 100 W tolerance
-        for(var power_bucket = 0; power_bucket <= 25; power_bucket += 1) {
-            var power_level = power_bucket * 1000;
-            if(this.pv_power > power_level - POWER_LEVEL_THRESHOLD && this.pv_power < power_level + POWER_LEVEL_THRESHOLD) {
-                return power_bucket;
-            }
-        }
-        return -1;
-    }
-
-    updatePanelVoltagePowerBuckets()
-    {
-        var power_bucket = this.getPowerBucket();
-        if(power_bucket < 0) {
-            return;
-        }
-
-        if(this.pv_panel_voltage_power_bucket[power_bucket] > 0) {
-            // Update the entry in the power bucket to get the minimum
-            //if(this.pv_panel_voltage < this.pv_panel_voltage_power_bucket[power_bucket]) {
-                this.pv_panel_voltage_power_bucket[power_bucket] = this.pv_panel_voltage;
-            //}
-        } else {
-            // No entry in power bucket yet
-            this.pv_panel_voltage_power_bucket[power_bucket] = this.pv_panel_voltage;
-        }
-
-        setState(this.SCRIPT_PV_PANEL_VOLTAGE_POWER_BUCKET_OBJ_PREFIX + power_bucket, this.pv_panel_voltage, true);
-    }
-
-    logPowerBuckets() {
-        var log_string = "Power Buckets:";
-        for(var power_bucket = 0; power_bucket < 25; power_bucket += 1) {
-            log_string += " " + power_bucket + "kW: " + this.pv_panel_voltage_power_bucket[power_bucket] + "V"
-        }
-        console.log(log_string);
     }
 
     processMeasurements() {
@@ -321,7 +239,6 @@ class PVSystem {
 
         this.self_consumption = this.pv_power - this.feedin_power;
 
-        this.pv_panel_voltage = getState(this.INV15_VOLTAGE_B_OBJ).val / this.INV15_NR_PV_PANELS_B;
-        this.updatePanelVoltagePowerBuckets();
+        this.mppt.processMeasurements(this.isCurtailed(), this.pv_power);
     }
 }
