@@ -27,7 +27,7 @@ class PVSystem {
         this.PV_FORECAST_POWER_NOW_OBJ = 'pvforecast.1.summary.power.now';
 
         // Static PV System Parameters
-        this.PV_PEAK_POWER_WATTS = 16400;
+        this.PV_PEAK_POWER_WATTS = 26400;
         this.PV_GRID_FEEDIN_MAX_WATTS = 13200;
         this.PV_TOTAL_NR_PV_PANELS = this.INV15_NR_PV_PANELS + this.INV10_NR_PV_PANELS;
         this.PV_PANEL_POWER_WATTS = 440;

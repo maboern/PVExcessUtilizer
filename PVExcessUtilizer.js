@@ -126,6 +126,7 @@ function resetDayValuesIfNecessary() {
         load_boiler_runtime_secs = 0;
         setState(SCRIPT_LOAD_BOILER_RUNTIME_OBJ, load_boiler_runtime_secs, true);
 
+        jackery.resetDayValues();
     }
 }
 
@@ -194,6 +195,8 @@ function controlLoads(available_excess_power) {
         }
     }
     
+    jackery.validateRunning(pv.getSelfConsumption());
+
     var cur_total_load_power = 0;
     var available_power = available_excess_power;
     available_power += (cellar_heater_on ? load_cellar_heater_power : 0);
@@ -228,6 +231,9 @@ function controlLoads(available_excess_power) {
         cur_total_load_power += load_cellar_heater_power;
         available_power -= load_cellar_heater_power;
     } 
+
+    jackery.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
+
     setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
     updateCellarHeaterRunTime(cellar_heater_on);
     updateBoilerRunTime(boiler_on);
