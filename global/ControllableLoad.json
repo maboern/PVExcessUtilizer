@@ -1,0 +1,275 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+const CONTROLLABLE_LOAD_TYPE = Object.freeze({
+    BATTERY : "battery",
+    HEATER : "heater"
+});
+
+class ControllableLoad {
+    constructor(script_id, name, load_type) {
+        this.name = name;
+        this.script_id = script_id;
+        this.SCRIPT_DEBUG = false;
+        this.load_type = load_type;
+        this.expected_power = 0;
+        this.load_hysteresis_power = 500;
+
+        this.runtime_secs = 0;
+        this.last_started_at = 0;
+        this.max_day_runtime_secs = 0;
+        this.day_energy = 0;
+
+        this.is_connected_obj = null;
+        this.switch_obj = null;
+        this.measured_power_obj = null;
+        
+        this.root_obj = this.script_id + '.info.load.' + this.name;
+        this.total_switch_count_obj = this.root_obj + '.switchCount';
+        createState(this.total_switch_count_obj, 0, {read: true, write: false, name: "Total Switch Count", type: "number", unit: "", def: 0});
+        this.runtime_secs_obj = this.root_obj + '.runtimeSecs';
+        createState(this.runtime_secs_obj, 0, {read: true, write: false, name: "Load Day Runtime", type: "number", unit: "s", def: 0});
+        this.total_energy_obj = this.root_obj + '.totalEnergy';
+        createState(this.total_energy_obj, 0, {read: true, write: false, name: "Load Total Energy", type: "number", unit: "Wh", def: 0});
+        this.day_energy_obj = this.root_obj + '.dayEnergy';
+        createState(this.day_energy_obj, 0, {read: true, write: false, name: "Load Day Energy", type: "number", unit: "Wh", def: 0});
+
+        this.runtime_secs = getState(this.runtime_secs_obj).val;
+    }
+
+    getLoadType() { return this.load_type; }
+    getLoadRootObj() { return  }
+
+    isReady() { 
+        if(this.is_connected_obj) {
+            return getState(this.is_connected_obj).val;
+        } else {
+            return false;
+        }
+    }
+
+    updateEnergyConsumption(interval) {
+        var interval_energy_Wh = interval * this.getCurrentPower() / 3600;
+        
+        this.day_energy += interval_energy_Wh;
+        setState(this.day_energy_obj, this.day_energy, true);
+        
+        var total_energy = getState(this.total_energy_obj).val;
+        total_energy += interval_energy_Wh;
+        setState(this.total_energy_obj, total_energy, true);
+    }
+
+    updateRunTime(interval) {
+        this.runtime_secs += interval;
+        setState(this.runtime_secs_obj, this.runtime_secs, true);
+
+        this.updateEnergyConsumption(interval);
+    }
+
+    resetDayValues() { 
+        this.day_energy = 0;
+        setState(this.day_energy_obj, this.day_energy, true);
+        this.runtime_secs = 0;
+        setState(this.runtime_secs_obj, this.runtime_secs, true);
+    }
+
+    isOn() { return getState(this.switch_obj).val; }
+    toString() { return `Load ${this.name} (${this.load_type})`; }
+
+    start(available_power) {
+        if(this.allowedToRun()) {
+            console.log("Turning ON Load " + this.name + "! (Surplus: " + available_power + "W)");
+            setState(this.switch_obj, true);
+
+            var switchCount = getState(this.total_switch_count_obj).val;
+            switchCount = switchCount + 1;
+            setState(this.total_switch_count_obj, switchCount, true);
+            this.last_started_at = Date.now();
+            return true;
+        } else {
+            console.log("Cannot turn ON Load + " + this.name + ": Not allowed to run.");
+            return false;
+        }
+    }
+
+    stop(available_power) {
+        var reason = "";
+        if(available_power > 0) {
+            reason = "(Available Power: " + available_power + "W)";
+        }
+        console.log("Turning OFF Load " + this.name + "! " + reason);
+        setState(this.switch_obj, false);
+    }
+
+    getMeasuredPower() {
+        return getState(this.measured_power_obj).val;
+    }
+
+    getCurrentPower() {
+        if(this.isReady()) {
+            if(this.measured_power_obj) {
+                return this.getMeasuredPower();
+            } else if(this.isOn()) {
+                return this.expected_power;
+            }
+        } 
+        return 0;
+    }
+
+    allowedToRun() {
+        if(this.isReady()) {
+            if(this.runtime_secs < this.max_day_runtime_secs) {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }   
+    }
+    
+    
+    isRunningForMs() {
+        if(this.isOn() && this.last_started_at > 0) {
+            return Date.now() - this.last_started_at;
+        }
+        return 0;
+    }
+    
+    validateDrawingPower(non_load_consumption) {
+        // Check whether the device is plausibly still drawing
+        // the expected power or has turned itself off
+        var measured_power = this.getMeasuredPower();
+        if(this.measured_power_obj && measured_power > 0) {
+            return true;
+        } else if(non_load_consumption >= this.expected_power) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    validateRunning(non_load_consumption) {
+        if(this.isOn()) {
+            if(!this.allowedToRun()) {
+                console.log("Load " + this.name + " is not allowed to run anymore. Stopping.");
+                this.stop(0);
+                return false;
+            } else if(!this.validateDrawingPower(non_load_consumption)) {
+                console.log("Load " + this.name + " is drawing too little to be running (" + non_load_consumption + "W / " + this.expected_power + "W).");
+                this.stop(0);
+                return false;
+            } else {
+                return true;
+            }
+        } else {
+            return false;
+        }
+    }
+
+    control(interval, available_power) {
+        if(!this.isReady()) {
+            return false;
+        }
+
+        if(this.isOn()) {
+            if(available_power < this.getCurrentPower() - this.load_hysteresis_power){
+                this.stop(available_power);
+            }
+            this.updateRunTime(interval);
+        } else {
+            if(available_power > this.expected_power + this.load_hysteresis_power) {
+                if(this.allowedToRun()) {
+                    this.start(available_power);
+                }
+            }
+        }
+        return true;
+    }
+}
+
+class ControllableBattery extends ControllableLoad {
+    constructor(script_id, name, capacity_wh) {
+        super(script_id, name, CONTROLLABLE_LOAD_TYPE.BATTERY);
+
+        this.capacity_wh = capacity_wh;
+        this.max_level_of_charge_percent = 80;
+        this.charging_loss_percent = 15;
+        this.max_day_runtime_secs = 5400;
+
+        this.expected_power = 1500;
+        this.load_hysteresis_power = 500;
+        this.is_connected_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.online';
+        this.switch_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.Relay0.Switch';
+        this.measured_power_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.Relay0.Power';
+
+        this.level_of_charge_percent_obj = this.root_obj + '.loc_percent';
+        createState(this.level_of_charge_percent_obj, 0, {read: true, write: true, name: "Level of Charge Percent", type: "number", unit: "%", def: 100});
+        this.level_of_charge_percent = getState(this.level_of_charge_percent_obj).val
+
+        console.log("Initialized " + this.toString());
+    }
+
+    toString() {
+        return super.toString() + ": " + this.capacity_wh + "Wh";
+    }
+
+    updateLevelOfCharge(interval) {
+        var interval_energy = interval * this.getCurrentPower();
+        var loc_percent_increase = (100 - this.charging_loss_percent) * interval_energy / (this.capacity_wh * 3600);
+        this.level_of_charge_percent += loc_percent_increase;
+        setState(this.level_of_charge_percent_obj, this.level_of_charge_percent, true);
+    }
+
+    updateRunTime(interval) {
+        super.updateRunTime(interval);
+        this.updateLevelOfCharge(interval);
+    }
+
+    hasStartedUp() {
+        const STARTUP_MILLISECONDS = 60 * 1000;
+        return (this.isRunningForMs() > STARTUP_MILLISECONDS);
+    }
+
+    validateDrawingFullPower() {
+        const POWER_DRAW_TOLERANCE = 200;
+        if(this.hasStartedUp()) {
+            var measured_power = this.getMeasuredPower();
+            if(measured_power < this.expected_power - POWER_DRAW_TOLERANCE) {
+                console.log("Load " + this.name + " is not drawing full power (" + measured_power + "/" + this.expected_power + "): Assuming 90%+ charged!");
+                this.level_of_charge_percent = 90;
+                setState(this.level_of_charge_percent_obj, this.level_of_charge_percent, true);
+                return false;
+            }
+        } 
+        return true;
+    }
+
+    allowedToRun() {      
+        if(this.level_of_charge_percent < this.max_level_of_charge_percent) {
+            return super.allowedToRun();
+        } else {
+            return false;
+        }
+    }
+
+    checkUpdateLocFromState() {
+        var old_loc = this.level_of_charge_percent;
+        this.level_of_charge_percent = getState(this.level_of_charge_percent_obj).val;
+        setState(this.level_of_charge_percent_obj, this.level_of_charge_percent, true);
+        if(this.level_of_charge_percent != old_loc) {
+            console.log("Load " + this.name + ": Updated LOC " + old_loc + "% -> " + this.level_of_charge_percent + "%");
+        }
+    }
+
+    validateRunning(non_load_consumption) {
+        this.checkUpdateLocFromState();
+        this.validateDrawingFullPower();
+        return super.validateRunning(non_load_consumption);
+    }
+}
+        

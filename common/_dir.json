@@ -1,0 +1,22 @@
+{
+  "_id": "script.js.common",
+  "type": "channel",
+  "common": {
+    "name": {
+      "en": "Common scripts (common)",
+      "de": "Allgemeine Skripte (common)",
+      "ru": "Общие скрипты (common)",
+      "pt": "Scripts comuns (common)",
+      "nl": "Common scripts (common)",
+      "fr": "Scénarios communs (common)",
+      "it": "Scrittori comuni (common)",
+      "es": "Scripts comunes (common)",
+      "pl": "Common script (common)",
+      "uk": "Загальні сценарії (common)",
+      "zh-cn": "共同说明 (common)"
+    }
+  },
+  "native": {},
+  "from": "system.host.santa-pi.cli",
+  "ts": 1740517686814
+}

@@ -1,7 +1,14 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
 // Static Script Parameters
 var SCRIPT_UPDATE_INTERVAL_SEC = 30;
 var SCRIPT_MAX_VALUE_AGE = 60 * 1000;
-var SCRIPT_LOAD_HISTERESYS_WATTS = 250;
+var SCRIPT_LOAD_HISTERESYS_WATTS = 500;
 var SCRIPT_DEBUG = false;
 var scriptRunTimeSecs = 0;
 var SCRIPT_ID = 'javascript.0';
@@ -45,6 +52,7 @@ var LOAD_BOILER_CONNECTED = 'modbus.2.info.connection';
 var LOAD_BOILER_SWITCH = 'modbus.2.coils.0_DO-00';
 var load_boiler_runtime_secs = 0;
 var load_boiler_day_energy = 0;
+var boilerCanRun = true; 
 
 let pv = new PVSystem('Turnerweg');
 console.log(pv.getDetails());
@@ -126,6 +134,8 @@ function resetDayValuesIfNecessary() {
         load_boiler_runtime_secs = 0;
         setState(SCRIPT_LOAD_BOILER_RUNTIME_OBJ, load_boiler_runtime_secs, true);
 
+        boilerCanRun = true;
+
         jackery.resetDayValues();
     }
 }
@@ -188,9 +198,11 @@ function controlLoads(available_excess_power) {
                 // has probably turned itself off because it has reached its target temperature
                 // From experiments, the heating element consumes power unequally as follows from 
                 // the shared power circuit: L1: 1.08kW, L2: 1.07kW, L3: 2.15kW
+                console.log("Boiler has stopped drawing power (Total Consumption Deficit: " + non_load_consumption + "). Stopping!");
                 stopBoiler(available_excess_power - load_cellar_heater_power);
                 load_boiler_power = 0;
                 boiler_on = false;
+                boilerCanRun = false;
             }
         }
     }
@@ -201,6 +213,7 @@ function controlLoads(available_excess_power) {
     var available_power = available_excess_power;
     available_power += (cellar_heater_on ? load_cellar_heater_power : 0);
     available_power += (boiler_on ? load_boiler_power : 0);
+    available_power += jackery.getCurrentPower();
     
     if(SCRIPT_DEBUG) {
         console.log("Excess: " + available_excess_power + "W; Available: " + available_power + "W");
@@ -208,7 +221,7 @@ function controlLoads(available_excess_power) {
 
     if(boiler_connected) {
         if(available_power >= LOAD_BOILER_EXPECTED_POWER_WATTS) {
-            if(!boiler_on && available_power > LOAD_BOILER_EXPECTED_POWER_WATTS + SCRIPT_LOAD_HISTERESYS_WATTS) {
+            if(!boiler_on && available_power > LOAD_BOILER_EXPECTED_POWER_WATTS + SCRIPT_LOAD_HISTERESYS_WATTS && boilerCanRun) {
                 startBoiler(available_power);
                 load_boiler_power = LOAD_BOILER_EXPECTED_POWER_WATTS;
             }
@@ -233,6 +246,7 @@ function controlLoads(available_excess_power) {
     } 
 
     jackery.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
+    cur_total_load_power += jackery.getCurrentPower();
 
     setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
     updateCellarHeaterRunTime(cellar_heater_on);
@@ -254,4 +268,3 @@ var Interval = setInterval(function () {
 var PVInterval = setInterval(function () {
   pv.processMeasurements(); // start processing in interval
 }, (pv.getUpdateIntervalMs()));
-

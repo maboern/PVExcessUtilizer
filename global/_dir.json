@@ -1,0 +1,22 @@
+{
+  "_id": "script.js.global",
+  "type": "channel",
+  "common": {
+    "name": {
+      "en": "Global scripts (global)",
+      "de": "Globale Skripte (global)",
+      "ru": "Глобальные скрипты (global)",
+      "pt": "Scripts globais (global)",
+      "nl": "Global scripts (global)",
+      "fr": "Scénarios mondiaux (global)",
+      "it": "Scrittori globali (global)",
+      "es": "Guiones globales (global)",
+      "pl": "Globalny scenariusz (global)",
+      "uk": "Глобальні сценарії (global)",
+      "zh-cn": "全球说明 (global)"
+    }
+  },
+  "native": {},
+  "from": "system.host.santa-pi.cli",
+  "ts": 1740517686815
+}

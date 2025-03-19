@@ -1,0 +1,11 @@
+{
+  "common": {
+    "name": "PVExcessUtilizer",
+    "expert": true
+  },
+  "type": "channel",
+  "from": "system.adapter.admin.0",
+  "user": "system.user.admin",
+  "ts": 1741895740199,
+  "_id": "script.js.common.PVExcessUtilizer"
+}
