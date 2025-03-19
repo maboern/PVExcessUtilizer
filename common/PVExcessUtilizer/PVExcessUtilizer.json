@@ -119,6 +119,11 @@ function updateBoilerRunTime(boiler_on) {
     }
 }
 
+function resetDayValues() {
+    console.log("Resetting statistics values of previous day!");
+    // TODO: Actually Reset
+}
+
 function resetDayValuesIfNecessary() {
     // Reset the daily values before the sun rises.
     const d = new Date();
@@ -257,14 +262,16 @@ function controlLoads(available_excess_power) {
 function updateControl() {
     if(!checkReady()) { return; }
 
-    pv.updateEstimation();
+    pv.writeState();
     controlLoads(pv.getExcessPower());
 }
+
+schedule('{"time":{"exactTime":true,"start":"nadir"},"period":{"days":1}}', resetDayValues);
 
 var Interval = setInterval(function () {
   updateControl(); // start processing in interval
 }, (SCRIPT_UPDATE_INTERVAL_SEC*1000));
 
 var PVInterval = setInterval(function () {
-  pv.processMeasurements(); // start processing in interval
+  pv.process(); // start processing in interval
 }, (pv.getUpdateIntervalMs()));

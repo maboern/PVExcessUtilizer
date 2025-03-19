@@ -5,13 +5,12 @@
   "verbose": false
 }
 -- do not edit previous lines - END --*/
+// PV curtailment estimate from Inverter MPPT (Maximum Power Point Tracking) via measured Panel voltage
 class MpptCurtailmentEstimator {
-    // Curtailment estimate from MPPT tracking / Panel voltage
-
     constructor(script_id, string_voltage_obj, nr_string_panels) {
         this.SCRIPT_DEBUG = false;
         this.MPPT_DYNAMICS = 0.1;
-        this.MIN_PANEL_VOLTAGE = 32;
+        this.POWER_SMOOTHING_DYNAMICS = 0.01;
 
         this.script_id = script_id;
         this.string_voltage_obj = string_voltage_obj;
@@ -20,26 +19,21 @@ class MpptCurtailmentEstimator {
         this.curtailment = 0;
         this.power = 0;
         this.smoothed_power = 0;
-        this.uncurtailed_panel_voltage = 0;
+        this.uncurtailed_panel_voltage = -1;
         this.last_uncurtailed_ts = 0;
         this.last_uncurtailed_power = 0;
         this.smoothed_panel_voltage = 0;
         this.panel_voltage = 0;
-        this.panel_voltage_power_bucket = [];
 
         this.root_obj = script_id + '.info.mppt';
-        this.SCRIPT_PV_CURTAILMENT_PERCENT_ESTIMATE_OBJ = this.root_obj + ".curtailment";
-        createState(this.SCRIPT_PV_CURTAILMENT_PERCENT_ESTIMATE_OBJ, 0, {read: true, write: false, name: "CurtailmentPercentEstimate", type: "number", unit: "%", def: 0});
-        this.SCRIPT_PV_MPPT_POWER_ESTIMATE_OBJ = this.root_obj + ".power";
-        createState(this.SCRIPT_PV_MPPT_POWER_ESTIMATE_OBJ, 0, {read: true, write: false, name: "PowerEstimate", type: "number", unit: "W", def: 0});
+        this.SCRIPT_CURTAILMENT_PERCENT_ESTIMATE_OBJ = this.root_obj + ".curtailment";
+        createState(this.SCRIPT_CURTAILMENT_PERCENT_ESTIMATE_OBJ, 0, {read: true, write: false, name: "CurtailmentPercentEstimate", type: "number", unit: "%", def: 0});
+        this.SCRIPT_MPPT_POWER_ESTIMATE_OBJ = this.root_obj + ".power";
+        createState(this.SCRIPT_MPPT_POWER_ESTIMATE_OBJ, 0, {read: true, write: false, name: "PowerEstimate", type: "number", unit: "W", def: 0});
         this.SCRIPT_SMOOTHED_PANEL_VOLTAGE_OBJ = this.root_obj + ".smoothed_panel_voltage";
         createState(this.SCRIPT_SMOOTHED_PANEL_VOLTAGE_OBJ, 0, {read: true, write: false, name: "SmoothedPanelVoltage", type: "number", unit: "V", def: 0});
         this.SCRIPT_UNCURTAILED_PANEL_VOLTAGE_OBJ = this.root_obj + ".uncurtailed_panel_voltage";
         createState(this.SCRIPT_UNCURTAILED_PANEL_VOLTAGE_OBJ, 0, {read: true, write: false, name: "UncurtailedPanelVoltage", type: "number", unit: "V", def: 0});
-        this.SCRIPT_PV_PANEL_VOLTAGE_POWER_BUCKET_OBJ_PREFIX = this.root_obj + ".panel_voltage_buckets.power_";
-        //for(var power_bucket = 0; power_bucket <= 25; power_bucket++) {
-        //    createState(this.SCRIPT_PV_PANEL_VOLTAGE_POWER_BUCKET_OBJ_PREFIX + power_bucket, 0, {read: true, write: false, name: "pvPanelVoltagePowerBucket_" + power_bucket, type: "number", unit: "V", def: 0});
-        //}
     }
 
     getCurtailmentPercent() { return this.curtailment; }
@@ -47,7 +41,7 @@ class MpptCurtailmentEstimator {
 
     updateCurtailmentEstimate()
     {
-        if(this.uncurtailed_panel_voltage == 0) {
+        if(this.uncurtailed_panel_voltage < 0) {
             var state = getState(this.SCRIPT_UNCURTAILED_PANEL_VOLTAGE_OBJ);
             if(state.ts >= Date.now() - 30*60*1000) {
                 this.uncurtailed_panel_voltage = state.val;
@@ -71,7 +65,6 @@ class MpptCurtailmentEstimator {
             // Voltage way above - something is strange
             this.curtailment = 0;
         }
-        setState(this.SCRIPT_PV_CURTAILMENT_PERCENT_ESTIMATE_OBJ, this.curtailment * 100, true);
     }
 
     estimateIsStale() {
@@ -89,93 +82,34 @@ class MpptCurtailmentEstimator {
         this.updateCurtailmentEstimate();
 
         this.power = pv_power / (1 - this.curtailment);
-        setState(this.SCRIPT_PV_MPPT_POWER_ESTIMATE_OBJ, this.power, true);
 
         if(!is_curtailed) {
             this.uncurtailed_panel_voltage = this.smoothed_panel_voltage;
-            setState(this.SCRIPT_UNCURTAILED_PANEL_VOLTAGE_OBJ, this.uncurtailed_panel_voltage, true);
             this.last_uncurtailed_ts = Date.now();
             this.last_uncurtailed_power = this.power;
         } 
 
-        this.smoothEstimatedPower();
-        if(this.SCRIPT_DEBUG) {
-            this.logPowerBuckets();
-        }
+        this.smoothed_power = smooth(this.smoothed_power, this.power, this.POWER_SMOOTHING_DYNAMICS);
     }
 
-    getPowerBucket(pv_power) {
-        const POWER_LEVEL_THRESHOLD = 100; // 100 W tolerance
-        for(var power_bucket = 0; power_bucket <= 25; power_bucket += 1) {
-            var power_level = power_bucket * 1000;
-            if(pv_power > power_level - POWER_LEVEL_THRESHOLD && pv_power < power_level + POWER_LEVEL_THRESHOLD) {
-                return power_bucket;
-            }
-        }
-        return -1;
-    }
-
-    updatePanelVoltagePowerBuckets(pv_power)
-    {
-        var power_bucket = this.getPowerBucket(pv_power);
-        if(power_bucket < 0) {
-            return;
-        }
-
-        if(this.panel_voltage_power_bucket[power_bucket] > 0) {
-            // Update the entry in the power bucket to get the minimum
-            var diff = this.panel_voltage - this.panel_voltage_power_bucket[power_bucket];
-            this.panel_voltage_power_bucket[power_bucket] += diff * this.MPPT_DYNAMICS;
-        } else {
-            // No entry in power bucket yet
-            this.panel_voltage_power_bucket[power_bucket] = this.panel_voltage;
-        }
-        setState(this.SCRIPT_PV_PANEL_VOLTAGE_POWER_BUCKET_OBJ_PREFIX + power_bucket, this.panel_voltage_power_bucket[power_bucket], true);
-    }
-
-    logPowerBuckets() 
-    {
-        var log_string = "Power Buckets:";
-        for(var power_bucket = 0; power_bucket < 25; power_bucket += 1) {
-            log_string += " " + power_bucket + "kW: " + this.panel_voltage_power_bucket[power_bucket] + "V"
-        }
-        console.log(log_string);
-    }
-
-    smoothMpptVoltage() 
-    {
-        if(this.smoothed_panel_voltage < this.MIN_PANEL_VOLTAGE) {
-            this.smoothed_panel_voltage = this.panel_voltage;
-        } else {
-            var diff = this.panel_voltage - this.smoothed_panel_voltage;
-            this.smoothed_panel_voltage += diff * this.MPPT_DYNAMICS;
-        }
-        setState(this.SCRIPT_SMOOTHED_PANEL_VOLTAGE_OBJ, this.smoothed_panel_voltage, true);
-    }
-
-    smoothEstimatedPower() {
-        const POWER_SMOOTHING_DYNAMICS = 0.01;
-        if(this.smoothed_power == 0) {
-            this.smoothed_power = this.power;
-        } else {
-            var diff = this.power - this.smoothed_power;
-            this.smoothed_power += diff * POWER_SMOOTHING_DYNAMICS;
-        }
-    }
-
-    processMeasurements(is_curtailed_now, pv_power) 
+    process(is_curtailed_now, pv_power) 
     {
         this.panel_voltage = getState(this.string_voltage_obj).val / this.nr_string_panels;
-        //this.updatePanelVoltagePowerBuckets(pv_power);
-        this.smoothMpptVoltage();
+        this.smoothed_panel_voltage = smooth(this.smoothed_panel_voltage, this.panel_voltage, this.MPPT_DYNAMICS);
+
         if(!is_curtailed_now) {
              if(this.smoothed_panel_voltage < this.uncurtailed_panel_voltage) {
                 this.uncurtailed_panel_voltage = this.smoothed_panel_voltage;
-                setState(this.SCRIPT_UNCURTAILED_PANEL_VOLTAGE_OBJ, this.uncurtailed_panel_voltage, true);
              }
         } else if(this.uncurtailed_panel_voltage > this.smoothed_panel_voltage) {
             this.uncurtailed_panel_voltage = this.smoothed_panel_voltage;
-            setState(this.SCRIPT_UNCURTAILED_PANEL_VOLTAGE_OBJ, this.uncurtailed_panel_voltage, true);
         }
+    }
+
+    writeState() {
+        setState(this.SCRIPT_UNCURTAILED_PANEL_VOLTAGE_OBJ, this.uncurtailed_panel_voltage, true);
+        setState(this.SCRIPT_SMOOTHED_PANEL_VOLTAGE_OBJ, this.smoothed_panel_voltage, true);
+        setState(this.SCRIPT_MPPT_POWER_ESTIMATE_OBJ, this.power, true);
+        setState(this.SCRIPT_CURTAILMENT_PERCENT_ESTIMATE_OBJ, this.curtailment * 100, true);
     }
 }

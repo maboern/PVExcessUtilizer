@@ -1,0 +1,29 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+function max(value, prev_max) {
+    if(value > prev_max) {
+        return value;
+    }
+    return prev_max;
+}
+
+function min(value, prev_min) {
+    if(value < prev_min || prev_min == 0) {
+        return value;
+    }
+    return prev_min;
+}
+
+function smooth(smoothed_value, new_value, dynamics) {
+    if(smoothed_value == 0) {
+        return new_value;
+    } else {
+        var diff = new_value - smoothed_value;
+        return smoothed_value + (diff * dynamics);
+    }
+}
