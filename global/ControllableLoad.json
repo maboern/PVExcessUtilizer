@@ -6,8 +6,9 @@
 }
 -- do not edit previous lines - END --*/
 const CONTROLLABLE_LOAD_TYPE = Object.freeze({
-    BATTERY : "battery",
-    HEATER : "heater"
+    BATTERY : "BATTERY",
+    HEATER : "HEATER",
+    BOILER : "BOILER"
 });
 
 class ControllableLoad {
@@ -18,11 +19,13 @@ class ControllableLoad {
         this.load_type = load_type;
         this.expected_power = 0;
         this.load_hysteresis_power = 500;
+        this.startup_time_ms = 10 * 1000;
 
         this.runtime_secs = 0;
         this.last_started_at = 0;
         this.max_day_runtime_secs = 0;
         this.day_energy = 0;
+        this.self_shutoff_at = 0;
 
         this.is_connected_obj = null;
         this.switch_obj = null;
@@ -75,6 +78,7 @@ class ControllableLoad {
         setState(this.day_energy_obj, this.day_energy, true);
         this.runtime_secs = 0;
         setState(this.runtime_secs_obj, this.runtime_secs, true);
+        this.self_shutoff_at = 0;
     }
 
     isOn() { return getState(this.switch_obj).val; }
@@ -105,6 +109,10 @@ class ControllableLoad {
         setState(this.switch_obj, false);
     }
 
+    hasStartedUp() {
+        return (this.isRunningForMs() > this.startup_time_ms);
+    }
+    
     getMeasuredPower() {
         return getState(this.measured_power_obj).val;
     }
@@ -148,6 +156,8 @@ class ControllableLoad {
             return true;
         } else if(non_load_consumption >= this.expected_power) {
             return true;
+        } else if(!this.hasStartedUp()) {
+            return true;
         } else {
             return false;
         }
@@ -161,6 +171,7 @@ class ControllableLoad {
                 return false;
             } else if(!this.validateDrawingPower(non_load_consumption)) {
                 console.log("Load " + this.name + " is drawing too little to be running (" + non_load_consumption + "W / " + this.expected_power + "W).");
+                this.self_shutoff_at = Date.now();
                 this.stop(0);
                 return false;
             } else {
@@ -192,84 +203,4 @@ class ControllableLoad {
     }
 }
 
-class ControllableBattery extends ControllableLoad {
-    constructor(script_id, name, capacity_wh) {
-        super(script_id, name, CONTROLLABLE_LOAD_TYPE.BATTERY);
-
-        this.capacity_wh = capacity_wh;
-        this.max_level_of_charge_percent = 80;
-        this.charging_loss_percent = 15;
-        this.max_day_runtime_secs = 5400;
-
-        this.expected_power = 1500;
-        this.load_hysteresis_power = 500;
-        this.is_connected_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.online';
-        this.switch_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.Relay0.Switch';
-        this.measured_power_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.Relay0.Power';
-
-        this.level_of_charge_percent_obj = this.root_obj + '.loc_percent';
-        createState(this.level_of_charge_percent_obj, 0, {read: true, write: true, name: "Level of Charge Percent", type: "number", unit: "%", def: 100});
-        this.level_of_charge_percent = getState(this.level_of_charge_percent_obj).val
-
-        console.log("Initialized " + this.toString());
-    }
-
-    toString() {
-        return super.toString() + ": " + this.capacity_wh + "Wh";
-    }
-
-    updateLevelOfCharge(interval) {
-        var interval_energy = interval * this.getCurrentPower();
-        var loc_percent_increase = (100 - this.charging_loss_percent) * interval_energy / (this.capacity_wh * 3600);
-        this.level_of_charge_percent += loc_percent_increase;
-        setState(this.level_of_charge_percent_obj, this.level_of_charge_percent, true);
-    }
-
-    updateRunTime(interval) {
-        super.updateRunTime(interval);
-        this.updateLevelOfCharge(interval);
-    }
-
-    hasStartedUp() {
-        const STARTUP_MILLISECONDS = 60 * 1000;
-        return (this.isRunningForMs() > STARTUP_MILLISECONDS);
-    }
-
-    validateDrawingFullPower() {
-        const POWER_DRAW_TOLERANCE = 200;
-        if(this.hasStartedUp()) {
-            var measured_power = this.getMeasuredPower();
-            if(measured_power < this.expected_power - POWER_DRAW_TOLERANCE) {
-                console.log("Load " + this.name + " is not drawing full power (" + measured_power + "/" + this.expected_power + "): Assuming 90%+ charged!");
-                this.level_of_charge_percent = 90;
-                setState(this.level_of_charge_percent_obj, this.level_of_charge_percent, true);
-                return false;
-            }
-        } 
-        return true;
-    }
-
-    allowedToRun() {      
-        if(this.level_of_charge_percent < this.max_level_of_charge_percent) {
-            return super.allowedToRun();
-        } else {
-            return false;
-        }
-    }
-
-    checkUpdateLocFromState() {
-        var old_loc = this.level_of_charge_percent;
-        this.level_of_charge_percent = getState(this.level_of_charge_percent_obj).val;
-        setState(this.level_of_charge_percent_obj, this.level_of_charge_percent, true);
-        if(this.level_of_charge_percent != old_loc) {
-            console.log("Load " + this.name + ": Updated LOC " + old_loc + "% -> " + this.level_of_charge_percent + "%");
-        }
-    }
-
-    validateRunning(non_load_consumption) {
-        this.checkUpdateLocFromState();
-        this.validateDrawingFullPower();
-        return super.validateRunning(non_load_consumption);
-    }
-}
         

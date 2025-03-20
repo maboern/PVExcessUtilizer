@@ -1,0 +1,29 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+class ControllableBoiler extends ControllableLoad {
+    constructor(script_id, name) {
+        super(script_id, name, CONTROLLABLE_LOAD_TYPE.BOILER);
+
+        this.expected_power = 4000;
+        this.load_hysteresis_power = 1000;
+        this.is_connected_obj = 'modbus.2.info.connection';;
+        this.switch_obj = 'modbus.2.coils.0_DO-00';
+        this.startup_time_ms = 5 * 1000;
+
+        console.log("Initialized " + this.toString());
+    }
+
+    toString() {
+        return super.toString() + ": " + this.expected_power + "W";
+    }
+
+    allowedToRun() {
+        // Not allowed to run if it has shut itself off (due to temperature being reached) today
+        return (super.allowedToRun() && this.self_shutoff_at == 0)
+    }
+}
