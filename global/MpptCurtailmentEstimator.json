@@ -70,8 +70,10 @@ class MpptCurtailmentEstimator {
     estimateIsStale() {
         const CURTAILMENT_VOLTAGE_ESTIMATE_STALENESS_TIMOUT_MS = 2*60*60*1000;
         const NORM_POWER_LEVEL_CHANGE = 2000;
-        var power_level_change = this.smoothed_power - this.last_uncurtailed_power;
+        const MIN_POWER_LEVEL_CHANGE_FACTOR = 0.05;
+        var power_level_change = Math.abs(this.smoothed_power - this.last_uncurtailed_power);
         var power_level_change_factor = power_level_change / NORM_POWER_LEVEL_CHANGE; 
+        power_level_change_factor = Math.max(power_level_change_factor,MIN_POWER_LEVEL_CHANGE_FACTOR); // Prevent Division by zero
         var staleness_timeout = CURTAILMENT_VOLTAGE_ESTIMATE_STALENESS_TIMOUT_MS / power_level_change_factor;
 
         return (Date.now() - this.last_uncurtailed_ts > staleness_timeout);
@@ -92,17 +94,16 @@ class MpptCurtailmentEstimator {
         this.smoothed_power = smooth(this.smoothed_power, this.power, this.POWER_SMOOTHING_DYNAMICS);
     }
 
-    process(is_curtailed_now, pv_power) 
+    process(partially_uncurtailed, pv_power) 
     {
         this.panel_voltage = getState(this.string_voltage_obj).val / this.nr_string_panels;
         this.smoothed_panel_voltage = smooth(this.smoothed_panel_voltage, this.panel_voltage, this.MPPT_DYNAMICS);
 
-        if(!is_curtailed_now) {
+        if(partially_uncurtailed) {
              if(this.smoothed_panel_voltage < this.uncurtailed_panel_voltage) {
+                console.debug("Partially uncurtailed - reducing uncurtailed panel voltage estimate (" + this.uncurtailed_panel_voltage + "V -> " + this.smoothed_panel_voltage + "V)");
                 this.uncurtailed_panel_voltage = this.smoothed_panel_voltage;
              }
-        } else if(this.uncurtailed_panel_voltage > this.smoothed_panel_voltage) {
-            this.uncurtailed_panel_voltage = this.smoothed_panel_voltage;
         }
     }
 

@@ -47,7 +47,7 @@ class PVSystem {
         this.PV_GRID_FEEDIN_OBJ = 'sma-em.0.3014001810.psurplus';
 
         // Configuration
-        this.PV_GRID_FEEDIN_TOLERANCE = 250;
+        this.PV_GRID_FEEDIN_TOLERANCE = 350;
         this.PV_MAX_DYNAMICS = 0.2;
         this.PV_MEASUREMENT_DYNAMICS = 0.01;
 
@@ -59,7 +59,6 @@ class PVSystem {
         this.pv_power_min = 0;
         this.pv_power_estimate = 0;
         this.pv_max_power_estimate = 0;
-        this.pv_available_excess_power = 0;
         this.feedin_power = 0;
         this.feedin_power_max = 0;
         this.feedin_power_min = 0;
@@ -98,6 +97,8 @@ class PVSystem {
         createState(this.SCRIPT_PV_ESTIMATE_MAX_WATTS_OBJ, 0, {read: true, write: false, name: "pvGenerationEstimateMaxPower", type: "number", unit: "W", def: 0});
         this.SCRIPT_PV_ESTIMATION_MODE_OBJ = this.SCRIPT_ID + ".info.pv_estimation_mode";
         createState(this.SCRIPT_PV_ESTIMATION_MODE_OBJ, "MAX", {read: true, write: false, name: "pvPowerEstimationMode", type: "string", def: "MAX"});
+        this.SCRIPT_PV_IS_CURTAILED_OBJ = this.SCRIPT_ID + ".info.pv_is_curtailed";
+        createState(this.SCRIPT_PV_IS_CURTAILED_OBJ, false, {read: true, write: false, name: "pvIsCurtailed", type: "boolean", def: false});
 
         console.log(`Initialized PV System ${this.name} (${this.PV_PEAK_POWER_WATTS} Wp).`)
     }
@@ -115,10 +116,6 @@ class PVSystem {
 
     getExcessPower() {
         return this.pv_excess_power_smoothed;
-    }
-
-    getAvailableExcessPower() {
-        return this.pv_available_excess_power;
     }
 
     checkReady() {
@@ -168,8 +165,9 @@ class PVSystem {
     isCurtailedFeedInValue(feedin_power) {
         if(feedin_power > this.PV_GRID_FEEDIN_MAX_WATTS - this.PV_GRID_FEEDIN_TOLERANCE) {
             return true;
-        } 
-        return false;
+        } else {
+            return false;
+        }
     }
 
     isCurtailed() {
@@ -185,7 +183,7 @@ class PVSystem {
         this.pv_max_power_estimate = pv_forecast;
         if(this.isCurtailed()) {
             // We are being curtailed
-            if(this.pv_power_max > pv_forecast) {
+            if(this.pv_power_max > this.pv_max_power_estimate) {
                 // We have observed higher PV power in this period - so we know we can at least produce that
                 this.pv_max_power_estimate = this.pv_power_max;
             }
@@ -243,9 +241,6 @@ class PVSystem {
         this.pv_excess_power_smoothed = smooth(this.pv_excess_power_smoothed, this.pv_excess_power, this.PV_MEASUREMENT_DYNAMICS)
 
        // TODO: Calculate real available excess power including controlled load power (Object oriented)
-
-        // At the end of the update we reset the min/max values for the next period
-        this.restartMeasurementPeriod();
     }
 
     process() {
@@ -266,7 +261,11 @@ class PVSystem {
         this.self_consumption_max = max(this.self_consumption, this.self_consumption_max);
         this.self_consumption_min = min(this.self_consumption, this.self_consumption_min);
 
-        this.mppt.process(this.isCurtailedFeedInValue(this.feedin_power), this.pv_power);
+        // Use temporary (partial) gaps in curtailment for MPPT tracking. This occurs
+        // if the system is in curtailment, but the adjustment of the generation curtailment
+        // has not yet been (fully) applied after a significant change in load.
+        var partially_uncurtailed = (this.isCurtailed() && !this.isCurtailedFeedInValue(this.feedin_power));
+        this.mppt.process(partially_uncurtailed, this.pv_power);
         this.updateEstimation();
     }
 
@@ -284,10 +283,15 @@ class PVSystem {
         setState(this.SCRIPT_PV_ESTIMATE_MAX_WATTS_OBJ, this.pv_max_power_estimate, true);
         setState(this.SCRIPT_PV_ESTIMATE_WATTS_OBJ, this.pv_power_estimate, true);
 
+        setState(this.SCRIPT_PV_IS_CURTAILED_OBJ, this.isCurtailed(), true);
+
         // For the sake of graphing, we floor the excess power at 0
-        this.pv_available_excess_power = this.pv_excess_power > 0 ? this.pv_excess_power : 0;
-        setState(this.SCRIPT_PV_AVAILABLE_EXCESS_WATTS_OBJ, this.pv_available_excess_power, true);
+        var pv_available_excess_power = this.pv_excess_power > 0 ? this.pv_excess_power : 0;
+        setState(this.SCRIPT_PV_AVAILABLE_EXCESS_WATTS_OBJ, pv_available_excess_power, true);
 
         this.mppt.writeState();
+        
+        // At the end of the update we reset the min/max values for the next period
+        this.restartMeasurementPeriod();
     }
 }
