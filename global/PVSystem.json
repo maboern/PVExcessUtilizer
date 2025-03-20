@@ -35,7 +35,7 @@ class PVSystem {
         this.INV10_CUR_POWER_WATTS_OBJ = this.INV10_MODBUS_ID + '.inputRegisters.60776_Measurement_GridMs_TotW';
         this.inv10_power = 0;
 
-        // PV Forecast from api.forecast.solar
+        // PV Forecast from API (Solcast / Forecast.solar)
         this.PV_FORECAST_POWER_NOW_OBJ = 'pvforecast.1.summary.power.now';
 
         // Static PV System Parameters
@@ -104,7 +104,7 @@ class PVSystem {
     }
 
     getDetails() {
-        return (`The name of the system is ${this.name}.`)
+        return (`The name of the PV system is ${this.name}.`)
     }
     getUpdateIntervalMs() {
         return this.updateIntervalMs;
@@ -128,7 +128,7 @@ class PVSystem {
         }
     }
 
-    updateShading() {
+    estimateShadingLoss() {
         /* The 15kW Inverter should produce more than the 10kW inverter proportional to the number
         of PV Panels on the string. */
         var inv15_potential_pv_production = this.inv10_power * this.INV15_NR_PV_PANELS / this.INV10_NR_PV_PANELS;
@@ -175,7 +175,7 @@ class PVSystem {
     }
 
     estimateMaxPotentialPower() {
-        this.updateShading();
+        this.estimateShadingLoss();
         this.fadeGenerationMax();
 
         var pv_forecast = getState(this.PV_FORECAST_POWER_NOW_OBJ).val;
@@ -212,11 +212,11 @@ class PVSystem {
     {
         this.mppt.updateEstimation(this.isCurtailed(), this.pv_power);
         
-        if(!this.mppt.estimateIsStale()) {
+        if(this.mppt.isReliable()) {
             this.setEstimationMode(PV_POWER_ESTIMATION_MODE.MPPT);
             this.pv_power_estimate = this.mppt.getPower();
         } else {
-            // If the MPPT estimate is stale (e.g. system is curtailed for a long time,
+            // If the MPPT estimate is not reliable (e.g. system is curtailed for a long time),
             // resort to an optimistic max etimate of maximum power to probe the limits
             this.setEstimationMode(PV_POWER_ESTIMATION_MODE.MAX);
             this.pv_power_estimate = this.estimateMaxPotentialPower(); 
@@ -261,11 +261,7 @@ class PVSystem {
         this.self_consumption_max = max(this.self_consumption, this.self_consumption_max);
         this.self_consumption_min = min(this.self_consumption, this.self_consumption_min);
 
-        // Use temporary (partial) gaps in curtailment for MPPT tracking. This occurs
-        // if the system is in curtailment, but the adjustment of the generation curtailment
-        // has not yet been (fully) applied after a significant change in load.
-        var partially_uncurtailed = (this.isCurtailed() && !this.isCurtailedFeedInValue(this.feedin_power));
-        this.mppt.process(partially_uncurtailed, this.pv_power);
+        this.mppt.process(this.pv_power);
         this.updateEstimation();
     }
 
