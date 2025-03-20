@@ -121,28 +121,20 @@ function updateBoilerRunTime(boiler_on) {
 
 function resetDayValues() {
     console.log("Resetting statistics values of previous day!");
-    // TODO: Actually Reset
-}
 
-function resetDayValuesIfNecessary() {
-    // Reset the daily values before the sun rises.
-    const d = new Date();
-    let hour = d.getHours();
-    if (hour < 5) {
-        load_shelly_cellar_heater_day_energy = 0;
-        setState(SCRIPT_LOAD_CELLAR_HEATER_DAY_ENERGY_OBJ, load_shelly_cellar_heater_day_energy, true);
-        load_shelly_cellar_heater_runtime_secs = 0;
-        setState(SCRIPT_LOAD_CELLAR_HEATER_RUNTIME_OBJ, load_shelly_cellar_heater_runtime_secs, true);
+    load_shelly_cellar_heater_day_energy = 0;
+    setState(SCRIPT_LOAD_CELLAR_HEATER_DAY_ENERGY_OBJ, load_shelly_cellar_heater_day_energy, true);
+    load_shelly_cellar_heater_runtime_secs = 0;
+    setState(SCRIPT_LOAD_CELLAR_HEATER_RUNTIME_OBJ, load_shelly_cellar_heater_runtime_secs, true);
 
-        load_boiler_day_energy = 0;
-        setState(SCRIPT_LOAD_BOILER_DAY_ENERGY_OBJ, load_boiler_day_energy, true);
-        load_boiler_runtime_secs = 0;
-        setState(SCRIPT_LOAD_BOILER_RUNTIME_OBJ, load_boiler_runtime_secs, true);
+    load_boiler_day_energy = 0;
+    setState(SCRIPT_LOAD_BOILER_DAY_ENERGY_OBJ, load_boiler_day_energy, true);
+    load_boiler_runtime_secs = 0;
+    setState(SCRIPT_LOAD_BOILER_RUNTIME_OBJ, load_boiler_runtime_secs, true);
 
-        boilerCanRun = true;
+    boilerCanRun = true;
 
-        jackery.resetDayValues();
-    }
+    jackery.resetDayValues();
 }
 
 function startBoiler(available_power)
@@ -256,7 +248,6 @@ function controlLoads(available_excess_power) {
     setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
     updateCellarHeaterRunTime(cellar_heater_on);
     updateBoilerRunTime(boiler_on);
-    resetDayValuesIfNecessary();
 }
 
 function updateControl() {
