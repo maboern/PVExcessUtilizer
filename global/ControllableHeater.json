@@ -1,0 +1,26 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+class ControllableHeater extends ControllableLoad {
+    constructor(script_id, name) {
+        super(script_id, name, CONTROLLABLE_LOAD_TYPE.HEATER);
+
+        this.expected_power = 2000;
+        this.load_hysteresis_power = 500;
+        this.is_connected_obj = 'shelly.0.shellyplusplugs#fcb4670921c4#1.online';
+        this.switch_obj = 'shelly.0.shellyplusplugs#fcb4670921c4#1.Relay0.Switch';
+        this.measured_power_obj = 'shelly.0.shellyplusplugs#fcb4670921c4#1.Relay0.Power';
+        this.startup_time_ms = 5 * 1000;
+        this.max_day_runtime_secs = 4*60*60;
+
+        console.log("Initialized " + this.toString());
+    }
+
+    toString() {
+        return super.toString() + ": " + this.expected_power + "W";
+    }
+}

@@ -23,7 +23,7 @@ class ControllableLoad {
 
         this.runtime_secs = 0;
         this.last_started_at = 0;
-        this.max_day_runtime_secs = 0;
+        this.max_day_runtime_secs = 12*60*60;
         this.day_energy = 0;
         this.self_shutoff_at = 0;
 
@@ -151,8 +151,7 @@ class ControllableLoad {
     validateDrawingPower(non_load_consumption) {
         // Check whether the device is plausibly still drawing
         // the expected power or has turned itself off
-        var measured_power = this.getMeasuredPower();
-        if(this.measured_power_obj && measured_power > 0) {
+        if(this.measured_power_obj && this.getMeasuredPower() > 0) {
             return true;
         } else if(non_load_consumption >= this.expected_power) {
             return true;

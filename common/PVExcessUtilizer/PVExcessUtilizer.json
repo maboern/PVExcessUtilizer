@@ -11,6 +11,7 @@ var SCRIPT_MAX_VALUE_AGE = 60 * 1000;
 var SCRIPT_LOAD_HISTERESYS_WATTS = 500;
 var SCRIPT_DEBUG = false;
 var scriptRunTimeSecs = 0;
+var isReady = false;
 var SCRIPT_ID = 'javascript.0';
 
 var SCRIPT_READY_OBJ = SCRIPT_ID + ".info.ready";
@@ -20,30 +21,12 @@ createState(SCRIPT_RUNTIME_SECS_OBJ, 0, {read: true, write: false, name: ".info.
 var SCRIPT_CONTROLLED_LOADS_WATTS_OBJ = SCRIPT_ID + ".info.controlled_loads_watts";
 createState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, 0, {read: true, write: false, name: "controlledLoadPower", type: "number", unit: "W", def: 0});
 
-var SCRIPT_LOAD_CELLAR_HEATER_RUNTIME_OBJ = SCRIPT_ID + ".info.load.cellarHeater.runtimeSecs";
-createState(SCRIPT_LOAD_CELLAR_HEATER_RUNTIME_OBJ, 0, {read: true, write: false, name: "loadCellarHeaterRuntimeSecs", type: "number", unit: "s", def: 0});
-var SCRIPT_LOAD_CELLAR_HEATER_SWITCH_COUNT_OBJ = SCRIPT_ID + ".info.load.cellarHeater.switchCount";
-createState(SCRIPT_LOAD_CELLAR_HEATER_SWITCH_COUNT_OBJ, 0, {read: true, write: false, name: "loadCellarHeaterSwitchCount", type: "number", def: 0});
-var SCRIPT_LOAD_CELLAR_HEATER_TOTAL_ENERGY_OBJ = SCRIPT_ID + ".info.load.cellarHeater.totalEnergy";
-createState(SCRIPT_LOAD_CELLAR_HEATER_TOTAL_ENERGY_OBJ, 0, {read: true, write: false, name: "loadCellarHeaterTotalEnergy", type: "number", unit: "Ws", def: 0});
-var SCRIPT_LOAD_CELLAR_HEATER_DAY_ENERGY_OBJ = SCRIPT_ID + ".info.load.cellarHeater.todayEnergy";
-createState(SCRIPT_LOAD_CELLAR_HEATER_DAY_ENERGY_OBJ, 0, {read: true, write: false, name: "loadCellarHeaterTodayEnergy", type: "number", unit: "Ws", def: 0});
-
-// Shelly SmartPlug as with Space Heater
-var LOAD_SHELLY_CELLAR_HEATER_EXPECTED_POWER_WATTS = 2000;
-var LOAD_SHELLY_CELLAR_HEATER_CONNECTED = 'shelly.0.info.connection';
-var LOAD_SHELLY_CELLAR_HEATER_SWITCH = 'shelly.0.shellyplusplugs#fcb4670921c4#1.Relay0.Switch';
-var LOAD_SHELLY_CELLAR_HEATER_POWER_OBJ = 'shelly.0.shellyplusplugs#fcb4670921c4#1.Relay0.Power'
-var load_shelly_cellar_heater_runtime_secs = 0;
-var load_shelly_cellar_heater_day_energy = 0;
-
-
-
 let pv = new PVSystem('Turnerweg');
 console.log(pv.getDetails());
 
 let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000);
 let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
+let heater = new ControllableHeater(SCRIPT_ID, 'Cellar Heater');
 
 function getRecentStateVal(obj) {
     var state = getState(obj);
@@ -61,79 +44,41 @@ function updateRunTime() {
 
 function checkReady() {
     if(pv.checkReady()) {
+        if(isReady == false) {
+            console.log("Script ready. Resuming....");
+        }
         setState(SCRIPT_READY_OBJ, true, true);
         updateRunTime();
+        isReady = true;
         return true;
     } else {
+        if(isReady == true) {
+            console.warn("Script became not ready after " + scriptRunTimeSecs + "s! Resetting runtime.");
+        }
         setState(SCRIPT_READY_OBJ,false, true);
         scriptRunTimeSecs = 0;
+        isReady = false;
         return false;
-    }
-}
-
-
-function updateCellarHeaterRunTime(water_heater_on) {
-    if(water_heater_on) {
-        load_shelly_cellar_heater_runtime_secs += SCRIPT_UPDATE_INTERVAL_SEC;
-        setState(SCRIPT_LOAD_CELLAR_HEATER_RUNTIME_OBJ, load_shelly_cellar_heater_runtime_secs, true);
-
-        var load_shelly_power = getState(LOAD_SHELLY_CELLAR_HEATER_POWER_OBJ).val;
-        var load_shelly_energy = load_shelly_power * SCRIPT_UPDATE_INTERVAL_SEC;
-
-        load_shelly_cellar_heater_day_energy += load_shelly_energy;
-        setState(SCRIPT_LOAD_CELLAR_HEATER_DAY_ENERGY_OBJ, load_shelly_cellar_heater_day_energy, true);
-
-        var totalEnergy = getState(SCRIPT_LOAD_CELLAR_HEATER_TOTAL_ENERGY_OBJ).val;
-        totalEnergy += load_shelly_energy;
-        setState(SCRIPT_LOAD_CELLAR_HEATER_TOTAL_ENERGY_OBJ, totalEnergy, true);
     }
 }
 
 function resetDayValues() {
     console.log("Resetting statistics values of previous day!");
 
-    load_shelly_cellar_heater_day_energy = 0;
-    setState(SCRIPT_LOAD_CELLAR_HEATER_DAY_ENERGY_OBJ, load_shelly_cellar_heater_day_energy, true);
-    load_shelly_cellar_heater_runtime_secs = 0;
-    setState(SCRIPT_LOAD_CELLAR_HEATER_RUNTIME_OBJ, load_shelly_cellar_heater_runtime_secs, true);
-
     jackery.resetDayValues();
     boiler.resetDayValues();
+    heater.resetDayValues();
 }
 
-function startCellarHeater(available_power)
+function controlLoads(available_excess_power) 
 {
-    console.log("Turning ON Load Cellar Heater! (Surplus: " + available_power + "W)");
-    setState(LOAD_SHELLY_CELLAR_HEATER_SWITCH, true);
-
-    var switchCount = getState(SCRIPT_LOAD_CELLAR_HEATER_SWITCH_COUNT_OBJ).val;
-    switchCount = switchCount + 1;
-    setState(SCRIPT_LOAD_CELLAR_HEATER_SWITCH_COUNT_OBJ, switchCount, true);
-}
-
-function stopCellarHeater(available_power)
-{
-    console.log("Turning OFF Load Cellar Heater! (Surplus: " + available_power + "W)");
-    setState(LOAD_SHELLY_CELLAR_HEATER_SWITCH, false);
-}
-
-function controlLoads(available_excess_power) {
-    var cellar_heater_connected = getState(LOAD_SHELLY_CELLAR_HEATER_CONNECTED).val;
-    var cellar_heater_on = false; 
-    var load_cellar_heater_power = 0;
-    if(cellar_heater_connected) {
-        cellar_heater_on = getState(LOAD_SHELLY_CELLAR_HEATER_SWITCH).val;
-        if(cellar_heater_on) {
-            load_cellar_heater_power = getState(LOAD_SHELLY_CELLAR_HEATER_POWER_OBJ).val;
-        }
-    }
-
     boiler.validateRunning(pv.getSelfConsumption());
     jackery.validateRunning(pv.getSelfConsumption());
+    heater.validateRunning(pv.getSelfConsumption());
 
     var cur_total_load_power = 0;
     var available_power = available_excess_power;
-    available_power += (cellar_heater_on ? load_cellar_heater_power : 0);
+    available_power += heater.getCurrentPower();
     available_power += boiler.getCurrentPower();
     available_power += jackery.getCurrentPower();
     
@@ -145,24 +90,15 @@ function controlLoads(available_excess_power) {
     cur_total_load_power += boiler.getCurrentPower();
     available_power -= boiler.getCurrentPower();
 
-    if(cellar_heater_connected ) {
-        if(available_power >= LOAD_SHELLY_CELLAR_HEATER_EXPECTED_POWER_WATTS) {
-            if(!cellar_heater_on && available_power > LOAD_SHELLY_CELLAR_HEATER_EXPECTED_POWER_WATTS + SCRIPT_LOAD_HISTERESYS_WATTS) {
-                startCellarHeater(available_power);
-                load_cellar_heater_power = LOAD_SHELLY_CELLAR_HEATER_EXPECTED_POWER_WATTS;
-            } 
-        } else if(cellar_heater_on && available_power < LOAD_SHELLY_CELLAR_HEATER_EXPECTED_POWER_WATTS - SCRIPT_LOAD_HISTERESYS_WATTS) {
-                stopCellarHeater(available_power);
-        } 
-        cur_total_load_power += load_cellar_heater_power;
-        available_power -= load_cellar_heater_power;
-    } 
+    heater.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
+    cur_total_load_power += heater.getCurrentPower();
+    available_power -= heater.getCurrentPower();
 
     jackery.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
     cur_total_load_power += jackery.getCurrentPower();
+    available_power -= jackery.getCurrentPower();
 
     setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
-    updateCellarHeaterRunTime(cellar_heater_on);
 }
 
 function updateControl() {
