@@ -27,3 +27,18 @@ function smooth(smoothed_value, new_value, dynamics) {
         return smoothed_value + (diff * dynamics);
     }
 }
+
+class RingBuffer {
+    constructor(length) {
+        this.pointer = 0;
+        this.length = length;
+        this.buffer = [];
+    }
+    push(item) {
+        this.buffer[this.pointer] = item;
+        this.pointer = (this.length + this.pointer + 1) % this.length;
+    }
+    max() {
+        return Math.max.apply(Math, this.buffer);
+    }
+}

@@ -47,7 +47,7 @@ class PVSystem {
         this.PV_GRID_FEEDIN_OBJ = 'sma-em.0.3014001810.psurplus';
 
         // Configuration
-        this.PV_GRID_FEEDIN_TOLERANCE = 350;
+        this.PV_GRID_FEEDIN_TOLERANCE = 250;
         this.PV_MAX_DYNAMICS = 0.2;
         this.PV_MEASUREMENT_DYNAMICS = 0.01;
 
@@ -65,6 +65,7 @@ class PVSystem {
         this.feedin_power_smoothed = 0;
         this.pv_feedin_limit_deviation = 0;
         this.pv_feedin_power_spread = 0;
+        this.pv_feedin_power_buffer = new RingBuffer(20);
         this.self_consumption = 0;
         this.self_consumption_max = 0;
         this.self_consumption_min = 0;
@@ -171,7 +172,7 @@ class PVSystem {
     }
 
     isCurtailed() {
-        return this.isCurtailedFeedInValue(this.feedin_power_smoothed);
+        return this.isCurtailedFeedInValue(this.pv_feedin_power_buffer.max());
     }
 
     estimateMaxPotentialPower() {
@@ -252,7 +253,8 @@ class PVSystem {
         this.feedin_power_min = min(this.feedin_power, this.feedin_power_min);
         this.pv_feedin_limit_deviation = this.feedin_power - this.PV_GRID_FEEDIN_MAX_WATTS;
         this.feedin_power_smoothed = smooth(this.feedin_power_smoothed, this.feedin_power, this.PV_MEASUREMENT_DYNAMICS);
-        
+        this.pv_feedin_power_buffer.push(this.feedin_power);
+
         this.pv_power = this.inv10_power + this.inv15_power;
         this.pv_power_max = max(this.pv_power, this.pv_power_max);
         this.pv_power_min = min(this.pv_power, this.pv_power_min);

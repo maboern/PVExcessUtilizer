@@ -101,9 +101,15 @@ class MpptCurtailmentEstimator {
             this.uncurtailed_panel_voltage = this.smoothed_panel_voltage;
             this.last_uncurtailed_ts = Date.now();
             this.last_uncurtailed_power = this.power;
-        } 
+        } else if(this.uncurtailed_panel_voltage > this.smoothed_panel_voltage) {
+            // This theoretically should not happen - correct in the right
+            // direction but do not update the time stamp
+            console.log("In curtailment but uncurtailed " + this.uncurtailed_panel_voltage + "V > current " + this.smoothed_panel_voltage +"V.");
+            this.uncurtailed_panel_voltage = this.smoothed_panel_voltage;
+        }
 
         this.smoothed_power = smooth(this.smoothed_power, this.power, this.POWER_SMOOTHING_DYNAMICS);
+        
     }
 
     process(pv_power) 
