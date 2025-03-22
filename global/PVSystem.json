@@ -11,9 +11,9 @@ const PV_POWER_ESTIMATION_MODE = Object.freeze({
 });
 
 class PVSystem {
-    constructor(name) {
+    constructor(script_id, name) {
         this.name = name;
-        this.SCRIPT_ID = 'javascript.0';
+        this.SCRIPT_ID = script_id;
         this.SCRIPT_DEBUG = false;
         this.updateIntervalMs = 1000;
 
@@ -50,26 +50,21 @@ class PVSystem {
         this.PV_GRID_FEEDIN_TOLERANCE = 250;
         this.PV_MAX_DYNAMICS = 0.2;
         this.PV_MEASUREMENT_DYNAMICS = 0.01;
+        this.PV_MEASUREMENT_LOOKBACK_SECS = 20;;
 
         this.estimation_mode = PV_POWER_ESTIMATION_MODE.MAX;
         this.mppt = new MpptCurtailmentEstimator(this.SCRIPT_ID, this.INV15_VOLTAGE_B_OBJ, this.INV15_NR_PV_PANELS_B);
         
         this.pv_power = 0;
         this.pv_power_max = 0;
-        this.pv_power_min = 0;
         this.pv_power_estimate = 0;
         this.pv_max_power_estimate = 0;
         this.feedin_power = 0;
-        this.feedin_power_max = 0;
-        this.feedin_power_min = 0;
         this.feedin_power_smoothed = 0;
         this.pv_feedin_limit_deviation = 0;
-        this.pv_feedin_power_spread = 0;
-        this.pv_feedin_power_buffer = new RingBuffer(20);
+        this.pv_feedin_power_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.self_consumption = 0;
-        this.self_consumption_max = 0;
-        this.self_consumption_min = 0;
-        this.self_consumption_spread = 0;
+        this.self_consumption_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.pv_excess_power = 0;
         this.pv_excess_power_smoothed = 0;
         this.pv_shading_loss = 0;
@@ -145,13 +140,6 @@ class PVSystem {
 
     restartMeasurementPeriod() {
         this.pv_power_max = this.pv_power;
-        this.pv_power_min = this.pv_power;
-
-        this.feedin_power_max = this.feedin_power;
-        this.feedin_power_min = this.feedin_power;
-
-        this.self_consumption_max = this.self_consumption;
-        this.self_consumption_min = this.self_consumption;
     }
 
     fadeGenerationMax() {
@@ -240,8 +228,6 @@ class PVSystem {
         // subtracting from the currently measured potential excess.
         this.pv_excess_power = unused_potential_power + this.pv_feedin_limit_deviation;
         this.pv_excess_power_smoothed = smooth(this.pv_excess_power_smoothed, this.pv_excess_power, this.PV_MEASUREMENT_DYNAMICS)
-
-       // TODO: Calculate real available excess power including controlled load power (Object oriented)
     }
 
     process() {
@@ -249,19 +235,15 @@ class PVSystem {
         this.inv15_power = getState(this.INV15_CUR_POWER_WATTS_OBJ).val;
 
         this.feedin_power = getState(this.PV_GRID_FEEDIN_OBJ).val;
-        this.feedin_power_max = max(this.feedin_power, this.feedin_power_max);
-        this.feedin_power_min = min(this.feedin_power, this.feedin_power_min);
         this.pv_feedin_limit_deviation = this.feedin_power - this.PV_GRID_FEEDIN_MAX_WATTS;
         this.feedin_power_smoothed = smooth(this.feedin_power_smoothed, this.feedin_power, this.PV_MEASUREMENT_DYNAMICS);
         this.pv_feedin_power_buffer.push(this.feedin_power);
 
         this.pv_power = this.inv10_power + this.inv15_power;
         this.pv_power_max = max(this.pv_power, this.pv_power_max);
-        this.pv_power_min = min(this.pv_power, this.pv_power_min);
 
         this.self_consumption = this.pv_power - this.feedin_power;
-        this.self_consumption_max = max(this.self_consumption, this.self_consumption_max);
-        this.self_consumption_min = min(this.self_consumption, this.self_consumption_min);
+        this.self_consumption_buffer.push(this.self_consumption);
 
         this.mppt.process(this.pv_power);
         this.updateEstimation();
@@ -272,10 +254,8 @@ class PVSystem {
         setState(this.SCRIPT_PV_CUR_WATTS_OBJ, this.pv_power, true);
         setState(this.SCRIPT_PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ, this.pv_feedin_limit_deviation, true);
         setState(this.SCRIPT_PV_SELF_CONSUMPTION_WATTS_OBJ, this.self_consumption, true);
-        this.pv_feedin_power_spread = this.feedin_power_max - this.feedin_power_min;
-        setState(this.SCRIPT_PV_FEEDIN_SPREAD_WATTS_OBJ, this.pv_feedin_power_spread, true);
-        this.self_consumption_spread = this.self_consumption_max - this.self_consumption_min;
-        setState(this.SCRIPT_PV_SELF_CONSUMPTION_SPREAD_OBJ, this.self_consumption_spread, true);
+        setState(this.SCRIPT_PV_FEEDIN_SPREAD_WATTS_OBJ, this.pv_feedin_power_buffer.spread(), true);
+        setState(this.SCRIPT_PV_SELF_CONSUMPTION_SPREAD_OBJ, this.self_consumption_buffer.spread(), true);
 
         setState(this.SCRIPT_PV_SHADING_LOSS_WATTS_OBJ, this.pv_shading_loss, true);
         setState(this.SCRIPT_PV_ESTIMATE_MAX_WATTS_OBJ, this.pv_max_power_estimate, true);

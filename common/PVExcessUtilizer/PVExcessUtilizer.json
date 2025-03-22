@@ -7,8 +7,6 @@
 -- do not edit previous lines - END --*/
 // Static Script Parameters
 var SCRIPT_UPDATE_INTERVAL_SEC = 30;
-var SCRIPT_MAX_VALUE_AGE = 60 * 1000;
-var SCRIPT_LOAD_HISTERESYS_WATTS = 500;
 var SCRIPT_DEBUG = false;
 var scriptRunTimeSecs = 0;
 var isReady = false;
@@ -21,7 +19,7 @@ createState(SCRIPT_RUNTIME_SECS_OBJ, 0, {read: true, write: false, name: ".info.
 var SCRIPT_CONTROLLED_LOADS_WATTS_OBJ = SCRIPT_ID + ".info.controlled_loads_watts";
 createState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, 0, {read: true, write: false, name: "controlledLoadPower", type: "number", unit: "W", def: 0});
 
-let pv = new PVSystem('Turnerweg');
+let pv = new PVSystem(SCRIPT_ID, 'Turnerweg');
 console.log(pv.getDetails());
 
 let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000);
@@ -29,6 +27,7 @@ let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
 let heater = new ControllableHeater(SCRIPT_ID, 'Cellar Heater');
 
 function getRecentStateVal(obj) {
+    const SCRIPT_MAX_VALUE_AGE = 60 * 1000;
     var state = getState(obj);
     if(state.ts >= (Date.now() - SCRIPT_MAX_VALUE_AGE)) {
         return state.val;
@@ -62,6 +61,43 @@ function checkReady() {
     }
 }
 
+
+function controlLoads() 
+{
+    boiler.validateRunning(pv.getSelfConsumption());
+    jackery.validateRunning(pv.getSelfConsumption());
+    heater.validateRunning(pv.getSelfConsumption());
+
+    var cur_total_load_power = 0;
+    cur_total_load_power += heater.getCurrentPower();
+    cur_total_load_power += boiler.getCurrentPower();
+    cur_total_load_power += jackery.getCurrentPower();
+    setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
+
+    var available_power = pv.getExcessPower() + cur_total_load_power;
+    
+    if(SCRIPT_DEBUG) {
+        console.debug("Excess: " + pv.getExcessPower() + "W; Available: " + available_power + "W");
+    }
+
+    boiler.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
+    available_power -= boiler.getCurrentPower();
+
+    heater.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
+    available_power -= heater.getCurrentPower();
+
+    jackery.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
+    available_power -= jackery.getCurrentPower();
+}
+
+function updateControl() {
+    if(!checkReady()) { return; }
+
+    pv.writeState();
+    controlLoads();
+}
+
+
 function resetDayValues() {
     console.log("Resetting statistics values of previous day!");
 
@@ -69,45 +105,6 @@ function resetDayValues() {
     boiler.resetDayValues();
     heater.resetDayValues();
 }
-
-function controlLoads(available_excess_power) 
-{
-    boiler.validateRunning(pv.getSelfConsumption());
-    jackery.validateRunning(pv.getSelfConsumption());
-    heater.validateRunning(pv.getSelfConsumption());
-
-    var cur_total_load_power = 0;
-    var available_power = available_excess_power;
-    available_power += heater.getCurrentPower();
-    available_power += boiler.getCurrentPower();
-    available_power += jackery.getCurrentPower();
-    
-    if(SCRIPT_DEBUG) {
-        console.debug("Excess: " + available_excess_power + "W; Available: " + available_power + "W");
-    }
-
-    boiler.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
-    cur_total_load_power += boiler.getCurrentPower();
-    available_power -= boiler.getCurrentPower();
-
-    heater.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
-    cur_total_load_power += heater.getCurrentPower();
-    available_power -= heater.getCurrentPower();
-
-    jackery.control(SCRIPT_UPDATE_INTERVAL_SEC, available_power);
-    cur_total_load_power += jackery.getCurrentPower();
-    available_power -= jackery.getCurrentPower();
-
-    setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
-}
-
-function updateControl() {
-    if(!checkReady()) { return; }
-
-    pv.writeState();
-    controlLoads(pv.getExcessPower());
-}
-
 schedule('{"time":{"exactTime":true,"start":"nadir"},"period":{"days":1}}', resetDayValues);
 
 var Interval = setInterval(function () {

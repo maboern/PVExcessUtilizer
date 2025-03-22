@@ -34,11 +34,21 @@ class RingBuffer {
         this.length = length;
         this.buffer = [];
     }
+
     push(item) {
         this.buffer[this.pointer] = item;
         this.pointer = (this.length + this.pointer + 1) % this.length;
     }
+
     max() {
         return Math.max.apply(Math, this.buffer);
+    }
+
+    min() {
+        return Math.max.apply(Math, this.buffer);
+    }
+
+    spread() {
+        return this.max() - this.min();
     }
 }
