@@ -124,7 +124,7 @@ class PVSystem {
         }
     }
 
-    estimateShadingLoss() {
+    updateShadingLossEstimate() {
         /* The 15kW Inverter should produce more than the 10kW inverter proportional to the number
         of PV Panels on the string. */
         var inv15_potential_pv_production = this.inv10_power * this.INV15_NR_PV_PANELS / this.INV10_NR_PV_PANELS;
@@ -163,8 +163,8 @@ class PVSystem {
         return this.isCurtailedFeedInValue(this.pv_feedin_power_buffer.max());
     }
 
-    estimateMaxPotentialPower() {
-        this.estimateShadingLoss();
+    updateMaxPotentialPowerEstimate() {
+        this.updateShadingLossEstimate();
         this.fadeGenerationMax();
 
         var pv_forecast = getState(this.PV_FORECAST_POWER_NOW_OBJ).val;
@@ -200,6 +200,7 @@ class PVSystem {
     estimatePotentialPower() 
     {
         this.mppt.updateEstimation(this.isCurtailed(), this.pv_power);
+        this.updateMaxPotentialPowerEstimate();
         
         if(this.mppt.isReliable()) {
             this.setEstimationMode(PV_POWER_ESTIMATION_MODE.MPPT);
@@ -208,7 +209,7 @@ class PVSystem {
             // If the MPPT estimate is not reliable (e.g. system is curtailed for a long time),
             // resort to an optimistic max etimate of maximum power to probe the limits
             this.setEstimationMode(PV_POWER_ESTIMATION_MODE.MAX);
-            this.pv_power_estimate = this.estimateMaxPotentialPower(); 
+            this.pv_power_estimate = this.pv_max_power_estimate; 
         }
 
         return this.pv_power_estimate;

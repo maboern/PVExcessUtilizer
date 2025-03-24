@@ -1,0 +1,60 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+// Tracks PV Panel cell temperature approximated with the
+// Linear Temperature Rise with Power (NOCT model)
+class MpptPanelTempTracker {
+    constructor(parent_root_obj) {
+        this.SCRIPT_DEBUG = true;
+
+        this.NOMINAL_MODULE_OPERATING_TEMPERATURE = 42.3; // Cell Temp at 800W/m2 at 20°C ambient
+        this.NOMINAL_MODULE_AMBIENT_TEMPERATURE = 20;
+        this.NOMINAL_MODULE_OPERATING_TEMPERATURE_OFFSET = this.NOMINAL_MODULE_OPERATING_TEMPERATURE - this.NOMINAL_MODULE_AMBIENT_TEMPERATURE;
+        this.NOMINAL_MODULE_IRRADIANCE = 800;
+        this.HEATING_TEMPERATURE_DYNAMICS = 0.1;
+        this.COOLING_TEMPERATURE_DYNAMICS = 0.02;
+        this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT = -0.27; // Delta_U = -0.27% / °C
+
+        this.panel_temperature = 20; // TODO: Restore from state
+        this.ambient_temperature = 15; // TODO: Hardcoded for now
+
+        this.root_obj = parent_root_obj + '.temp';
+        this.TEMPERATURE_ESTIMATE_OBJ = this.root_obj + ".module_temperature";
+        createState(this.TEMPERATURE_ESTIMATE_OBJ, 0, {read: true, write: false, name: "PV Module Temperature Estimate", type: "number", unit: "°C", def: 0});
+
+    }
+
+    getTemperature() { return this.panel_temperature; }
+    process(irradiance) {
+
+        // Calculate the temperature after the cell reaches thermal equilibrium with the current irradiance
+        var normalized_irradiance = irradiance / this.NOMINAL_MODULE_IRRADIANCE;
+        var equilibrium_panel_temperature = this.ambient_temperature + (normalized_irradiance * this.NOMINAL_MODULE_OPERATING_TEMPERATURE_OFFSET);
+
+        // Adjust the current cell temperature towards thermal equilibrium with Exponential Moving Average
+        var temperature_diff = equilibrium_panel_temperature - this.panel_temperature;
+        var temperature_dynamics = 0;
+        if(temperature_diff > 0) {
+            // Apply a higher temperature coefficient when heating up compared to cooling down
+            temperature_dynamics = this.HEATING_TEMPERATURE_DYNAMICS;
+        } else {
+            temperature_dynamics = this.COOLING_TEMPERATURE_DYNAMICS;
+        }
+        this.panel_temperature += temperature_diff * temperature_dynamics;
+    }
+    
+    correctVoltage(reference_voltage, reference_temperature) {
+        var temp_diff = this.panel_temperature - reference_temperature;
+        var temperature_correction_percent = temp_diff * this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT;
+        var temperature_corrected_voltage = reference_voltage * (1 + temperature_correction_percent);
+        return temperature_corrected_voltage;
+    }
+
+    writeState() {
+        setState(this.TEMPERATURE_ESTIMATE_OBJ, this.panel_temperature, true);
+    }
+}
