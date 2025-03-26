@@ -18,8 +18,9 @@ class ControllableLoad {
         this.SCRIPT_DEBUG = false;
         this.load_type = load_type;
         this.expected_power = 0;
-        this.load_hysteresis_power = 500;
+        this.load_hysteresis_power = 250;
         this.startup_time_ms = 10 * 1000;
+        this.min_runtime_secs = 0;
 
         this.runtime_secs = 0;
         this.last_started_at = 0;
@@ -44,9 +45,8 @@ class ControllableLoad {
         this.runtime_secs = getState(this.runtime_secs_obj).val;
     }
 
-    getLoadType() { return this.load_type; }
-    getLoadRootObj() { return  }
-
+    isOn() { return getState(this.switch_obj).val; }
+    toString() { return `Load ${this.name} (${this.load_type})`; }
     isReady() { 
         if(this.is_connected_obj) {
             return getState(this.is_connected_obj).val;
@@ -81,9 +81,6 @@ class ControllableLoad {
         this.self_shutoff_at = 0;
     }
 
-    isOn() { return getState(this.switch_obj).val; }
-    toString() { return `Load ${this.name} (${this.load_type})`; }
-
     start(available_power) {
         if(this.allowedToRun()) {
             console.log("Turning ON Load " + this.name + "! (Surplus: " + available_power + "W)");
@@ -112,7 +109,15 @@ class ControllableLoad {
     hasStartedUp() {
         return (this.isRunningForMs() > this.startup_time_ms);
     }
+
+    hasRunForMinimumTime() {
+        return (this.isRunningForMs() > this.min_runtime_secs * 1000);
+    }
     
+    getExpectedPower() {
+        return this.expected_power;
+    }
+
     getMeasuredPower() {
         return getState(this.measured_power_obj).val;
     }
@@ -181,20 +186,22 @@ class ControllableLoad {
         }
     }
 
-    control(interval, available_power) {
+    control(interval, min_available_power, max_available_power) {
         if(!this.isReady()) {
             return false;
         }
 
         if(this.isOn()) {
-            if(available_power < this.getCurrentPower() - this.load_hysteresis_power){
-                this.stop(available_power);
+            if(this.hasRunForMinimumTime()) {
+                if(min_available_power < this.getCurrentPower() - this.load_hysteresis_power){
+                    this.stop(min_available_power);
+                }
             }
             this.updateRunTime(interval);
         } else {
-            if(available_power > this.expected_power + this.load_hysteresis_power) {
+            if(max_available_power > this.expected_power + this.load_hysteresis_power) {
                 if(this.allowedToRun()) {
-                    this.start(available_power);
+                    this.start(max_available_power);
                 }
             }
         }

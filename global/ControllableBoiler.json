@@ -10,7 +10,7 @@ class ControllableBoiler extends ControllableLoad {
         super(script_id, name, CONTROLLABLE_LOAD_TYPE.BOILER);
 
         this.expected_power = 4000;
-        this.load_hysteresis_power = 1000;
+        this.load_hysteresis_power = 250;
         this.is_connected_obj = 'modbus.2.info.connection';;
         this.switch_obj = 'modbus.2.coils.0_DO-00';
         this.startup_time_ms = 5 * 1000;

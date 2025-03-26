@@ -14,9 +14,10 @@ class ControllableBattery extends ControllableLoad {
         this.charging_loss_percent = 15;
         this.max_day_runtime_secs = 5400;
         this.startup_time_ms = 60 * 1000;
+        this.min_runtime_secs = 5 * 60;
 
         this.expected_power = 1500;
-        this.load_hysteresis_power = 500;
+        this.load_hysteresis_power = 150;
         this.is_connected_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.online';
         this.switch_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.Relay0.Switch';
         this.measured_power_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.Relay0.Power';

@@ -11,29 +11,42 @@ class MpptPanelTempTracker {
     constructor(parent_root_obj) {
         this.SCRIPT_DEBUG = true;
 
-        this.NOMINAL_MODULE_OPERATING_TEMPERATURE = 42.3; // Cell Temp at 800W/m2 at 20°C ambient
+        this.NOMINAL_MODULE_OPERATING_TEMPERATURE = 42.3; // Cell Temp at 800W/m2 at 20°C ambient with 1m/s wind speed
         this.NOMINAL_MODULE_AMBIENT_TEMPERATURE = 20;
         this.NOMINAL_MODULE_OPERATING_TEMPERATURE_OFFSET = this.NOMINAL_MODULE_OPERATING_TEMPERATURE - this.NOMINAL_MODULE_AMBIENT_TEMPERATURE;
         this.NOMINAL_MODULE_IRRADIANCE = 800;
-        this.HEATING_TEMPERATURE_DYNAMICS = 0.1;
-        this.COOLING_TEMPERATURE_DYNAMICS = 0.02;
-        this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT = -0.27; // Delta_U = -0.27% / °C
+        this.HEATING_TEMPERATURE_DYNAMICS = 0.02;
+        this.COOLING_TEMPERATURE_DYNAMICS = 0.004;
+        this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT = -0.0027; // Delta_U = -0.27% / °C
 
-        this.panel_temperature = 20; // TODO: Restore from state
-        this.ambient_temperature = 15; // TODO: Hardcoded for now
+        this.panel_temperature = 25; // TODO: Restore from state
+        this.ambient_temperature = 20; 
+        this.ambient_temperature_sensor_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.AUSSENTEMPERATUR'
 
         this.root_obj = parent_root_obj + '.temp';
         this.TEMPERATURE_ESTIMATE_OBJ = this.root_obj + ".module_temperature";
         createState(this.TEMPERATURE_ESTIMATE_OBJ, 0, {read: true, write: false, name: "PV Module Temperature Estimate", type: "number", unit: "°C", def: 0});
 
+        this.restoreState();
+    }
+    restoreState() {
+        this.updateAmbientTemperature();
+        var panel_temp_state = getState(this.TEMPERATURE_ESTIMATE_OBJ);
+        if(panel_temp_state.ts > Date.now() - 10*60*1000) {
+            this.panel_temperature = panel_temp_state.val;
+            console.log("Updating panel temperature from state: " + this.panel_temperature + "°C @ ambient" + this.ambient_temperature + "°C.");
+        }
     }
 
-    getTemperature() { return this.panel_temperature; }
+    getPanelTemperature() { return this.panel_temperature; }
     process(irradiance) {
-
         // Calculate the temperature after the cell reaches thermal equilibrium with the current irradiance
         var normalized_irradiance = irradiance / this.NOMINAL_MODULE_IRRADIANCE;
         var equilibrium_panel_temperature = this.ambient_temperature + (normalized_irradiance * this.NOMINAL_MODULE_OPERATING_TEMPERATURE_OFFSET);
+
+        if(this.SCRIPT_DEBUG) {
+            console.info("Normalized irradiance: " + normalized_irradiance + ", Equilibrium Temp: " + equilibrium_panel_temperature + ".");
+        }
 
         // Adjust the current cell temperature towards thermal equilibrium with Exponential Moving Average
         var temperature_diff = equilibrium_panel_temperature - this.panel_temperature;
@@ -54,7 +67,15 @@ class MpptPanelTempTracker {
         return temperature_corrected_voltage;
     }
 
+    updateAmbientTemperature() {
+        var temp_obj = getState(this.ambient_temperature_sensor_obj);
+        if(temp_obj && temp_obj.ts > Date.now() - 60*60*1000) {
+            this.ambient_temperature = temp_obj.val;
+        }
+    }
     writeState() {
         setState(this.TEMPERATURE_ESTIMATE_OBJ, this.panel_temperature, true);
+
+        this.updateAmbientTemperature();
     }
 }

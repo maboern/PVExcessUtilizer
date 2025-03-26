@@ -10,7 +10,7 @@ class ControllableHeater extends ControllableLoad {
         super(script_id, name, CONTROLLABLE_LOAD_TYPE.HEATER);
 
         this.expected_power = 2000;
-        this.load_hysteresis_power = 500;
+        this.load_hysteresis_power = 100;
         this.is_connected_obj = 'shelly.0.shellyplusplugs#fcb4670921c4#1.online';
         this.switch_obj = 'shelly.0.shellyplusplugs#fcb4670921c4#1.Relay0.Switch';
         this.measured_power_obj = 'shelly.0.shellyplusplugs#fcb4670921c4#1.Relay0.Power';
