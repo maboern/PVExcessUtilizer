@@ -45,7 +45,7 @@ class RingBuffer {
     }
 
     min() {
-        return Math.max.apply(Math, this.buffer);
+        return Math.min.apply(Math, this.buffer);
     }
 
     spread() {

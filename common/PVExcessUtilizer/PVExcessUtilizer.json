@@ -10,23 +10,23 @@ var SCRIPT_UPDATE_INTERVAL_SEC = 15;
 var SCRIPT_DEBUG = false;
 var scriptRunTimeSecs = 0;
 var isReady = false;
-var SCRIPT_ID = 'javascript.0';
+var SCRIPT_ID = 'javascript.0.info';
 
-var SCRIPT_READY_OBJ = SCRIPT_ID + ".info.ready";
+var SCRIPT_READY_OBJ = SCRIPT_ID + ".ready";
 createState(SCRIPT_READY_OBJ, false, {read: true, write: false, name: "ready", type: "boolean", def: false});
-var SCRIPT_RUNTIME_SECS_OBJ = SCRIPT_ID + ".info.runTimeSecs";
-createState(SCRIPT_RUNTIME_SECS_OBJ, 0, {read: true, write: false, name: ".info.runTimeSecs", type: "number", unit: "s", def: 0});
-var SCRIPT_CONTROLLED_LOADS_WATTS_OBJ = SCRIPT_ID + ".info.controlled_loads_watts";
+var SCRIPT_RUNTIME_SECS_OBJ = SCRIPT_ID + ".runTimeSecs";
+createState(SCRIPT_RUNTIME_SECS_OBJ, 0, {read: true, write: false, name: ".runTimeSecs", type: "number", unit: "s", def: 0});
+var SCRIPT_CONTROLLED_LOADS_WATTS_OBJ = SCRIPT_ID + ".controlled_loads_watts";
 createState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, 0, {read: true, write: false, name: "controlledLoadPower", type: "number", unit: "W", def: 0});
-var SCRIPT_AVAILABLE_MIN_WATTS_OBJ = SCRIPT_ID + ".info.min_available_watts";
+var SCRIPT_AVAILABLE_MIN_WATTS_OBJ = SCRIPT_ID + ".min_available_watts";
 createState(SCRIPT_AVAILABLE_MIN_WATTS_OBJ, 0, {read: true, write: false, name: "Min Available Watts", type: "number", unit: "W", def: 0});
-var SCRIPT_AVAILABLE_MAX_WATTS_OBJ = SCRIPT_ID + ".info.max_available_watts";
+var SCRIPT_AVAILABLE_MAX_WATTS_OBJ = SCRIPT_ID + ".max_available_watts";
 createState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, 0, {read: true, write: false, name: "Max Available Watts", type: "number", unit: "W", def: 0});
 
 let pv = new PVSystem(SCRIPT_ID, 'Turnerweg');
 let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000);
 let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
-let heater = new ControllableHeater(SCRIPT_ID, 'Cellar Heater');
+let heater = new ControllableHeater(SCRIPT_ID, 'CellarHeater');
 
 function getRecentStateVal(obj) {
     const SCRIPT_MAX_VALUE_AGE = 60 * 1000;
@@ -71,33 +71,49 @@ function controlLoads()
     heater.validateRunning(pv.getSelfConsumption());
 
     var cur_total_load_power = 0;
+
     cur_total_load_power += heater.getCurrentPower();
     cur_total_load_power += boiler.getCurrentPower();
     cur_total_load_power += jackery.getCurrentPower();
     setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
 
-    var min_available_power = pv.getMinExcessPower() + cur_total_load_power;
+    var cur_disposable_load_power = 0;
+    if(heater.allowedToStop()) {
+        cur_disposable_load_power += heater.getCurrentPower();
+    }
+    if(boiler.allowedToStop()) {
+        cur_disposable_load_power += boiler.getCurrentPower();
+    }
+    if(jackery.allowedToStop()) {
+        cur_disposable_load_power += jackery.getCurrentPower();
+    }
+
+
+    var min_available_power = pv.getMinExcessPower() + cur_disposable_load_power;
     setState(SCRIPT_AVAILABLE_MIN_WATTS_OBJ, min_available_power, true);
-    var max_available_power = pv.getMaxExcessPower() + cur_total_load_power;
+    var max_available_power = pv.getMaxExcessPower() + cur_disposable_load_power;
     setState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, max_available_power, true);
     
     if(SCRIPT_DEBUG) {
-        console.info("Excess: " + pv.getExcessPower() + "W; Available: (Min: " + min_available_power + "W, Max: " + max_available_power + "W).");
+        log("Excess: " + pv.getExcessPower() + "W; Available: (Min: " + min_available_power + "W, Max: " + max_available_power + "W).", 'silly');
     }
 
     // TODO: Calculate Confidence Level from Generation Nowcast (Power - Forecast)
     // and Consumption Forecast (SEMP / maybe Statistics)
     boiler.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
-    min_available_power -= boiler.getExpectedPower();
-    max_available_power -= boiler.getExpectedPower();
+    var expected_boiler_power = boiler.isOn() ? boiler.getExpectedPower() : 0;
+    min_available_power -= expected_boiler_power;
+    max_available_power -= expected_boiler_power;
 
     heater.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
-    min_available_power -= heater.getExpectedPower();
-    max_available_power -= heater.getExpectedPower();
+    var expected_heater_power = heater.isOn() ? heater.getExpectedPower() : 0;
+    min_available_power -= expected_heater_power;
+    max_available_power -= expected_heater_power;
 
     jackery.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
-    min_available_power -= jackery.getExpectedPower();
-    max_available_power -= jackery.getExpectedPower(); 
+    var expected_jackery_power = jackery.isOn() ? jackery.getExpectedPower() : 0;
+    min_available_power -= expected_jackery_power;
+    max_available_power -= expected_jackery_power; 
 }
 
 function updateControl() {
@@ -110,6 +126,7 @@ function updateControl() {
 function resetDayValues() {
     console.log("Resetting statistics values of previous day!");
 
+    pv.resetDayValues();
     jackery.resetDayValues();
     boiler.resetDayValues();
     heater.resetDayValues();

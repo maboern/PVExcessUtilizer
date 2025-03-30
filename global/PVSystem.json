@@ -50,7 +50,7 @@ class PVSystem {
         this.PV_GRID_FEEDIN_TOLERANCE = 250;
         this.PV_MAX_DYNAMICS = 0.2;
         this.PV_MEASUREMENT_DYNAMICS = 0.01;
-        this.PV_MEASUREMENT_LOOKBACK_SECS = 20;;
+        this.PV_MEASUREMENT_LOOKBACK_SECS = 20;
 
         this.estimation_mode = PV_POWER_ESTIMATION_MODE.MAX;
         this.mppt = new MpptCurtailmentEstimator(this.root_obj, this.INV15_VOLTAGE_B_OBJ, this.INV15_NR_PV_PANELS_B);
@@ -71,38 +71,46 @@ class PVSystem {
         this.pv_shading_loss = 0;
         this.irradiance = 0;
 
-        this.SCRIPT_FEEDIN_MAX_WATTS_OBJ = this.root_obj + ".info.feedin_max_watts";
-        createState(this.SCRIPT_FEEDIN_MAX_WATTS_OBJ, 0, {read: true, write: false, name: "gridFeedInMaxWatts", type: "number", unit: "W", def: this.PV_GRID_FEEDIN_MAX_WATTS});
-        this.PV_CUR_WATTS_OBJ = this.root_obj + ".info.pv_cur_watts";
+        this.PV_CUR_WATTS_OBJ = this.root_obj + ".pv_cur_watts";
         createState(this.PV_CUR_WATTS_OBJ, 0, {read: true, write: false, name: "pvProductionCurrentPower", type: "number", unit: "W", def: 0});
-        this.PV_FEEDIN_WATTS_OBJ = this.root_obj + ".info.pv_feedin_watts";
+        this.PV_FEEDIN_WATTS_OBJ = this.root_obj + ".pv_feedin_watts";
         createState(this.PV_FEEDIN_WATTS_OBJ, 0, {read: true, write: false, name: "pvFeedInPower", type: "number", unit: "W", def: 0});
-        this.PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ = this.root_obj + ".info.pv_feedin_limit_deviation_watts";
+        this.PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ = this.root_obj + ".pv_feedin_limit_deviation_watts";
         createState(this.PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ, 0, {read: true, write: false, name: "pvFeedInLimitDeviation", type: "number", unit: "W", def: 0});
-        this.PV_FEEDIN_SPREAD_WATTS_OBJ = this.root_obj + ".info.pv_feedin_spread_watts";
+        this.PV_FEEDIN_SPREAD_WATTS_OBJ = this.root_obj + ".pv_feedin_spread_watts";
         createState(this.PV_FEEDIN_SPREAD_WATTS_OBJ, 0, {read: true, write: false, name: "pvFeedInSpread", type: "number", unit: "W", def: 0});
-        this.PV_SHADING_LOSS_WATTS_OBJ = this.root_obj + ".info.pv_shading_loss_watts";
+        this.PV_SHADING_LOSS_WATTS_OBJ = this.root_obj + ".pv_shading_loss_watts";
         createState(this.PV_SHADING_LOSS_WATTS_OBJ, 0, {read: true, write: false, name: "pvShadingLossPower", type: "number", unit: "W", def: 0});
-        this.SCRIPT_PV_AVAILABLE_EXCESS_WATTS_OBJ = this.root_obj + ".info.pv_available_excess_watts";
-        createState(this.SCRIPT_PV_AVAILABLE_EXCESS_WATTS_OBJ, 0, {read: true, write: false, name: "pvProductionAvailableExcessPower", type: "number", unit: "W", def: 0});
-        this.PV_SELF_CONSUMPTION_WATTS_OBJ = this.root_obj + ".info.pv_self_consumption_watts";
+        this.PV_AVAILABLE_EXCESS_WATTS_OBJ = this.root_obj + ".pv_available_excess_watts";
+        createState(this.PV_AVAILABLE_EXCESS_WATTS_OBJ, 0, {read: true, write: false, name: "pvProductionAvailableExcessPower", type: "number", unit: "W", def: 0});
+        this.PV_SELF_CONSUMPTION_WATTS_OBJ = this.root_obj + ".pv_self_consumption_watts";
         createState(this.PV_SELF_CONSUMPTION_WATTS_OBJ, 0, {read: true, write: false, name: "pvSelfConsumptionPower", type: "number", unit: "W", def: 0});
-        this.PV_SELF_CONSUMPTION_SPREAD_OBJ = this.root_obj + ".info.pv_self_consumption_spread";
+        this.PV_SELF_CONSUMPTION_SPREAD_OBJ = this.root_obj + ".pv_self_consumption_spread";
         createState(this.PV_SELF_CONSUMPTION_SPREAD_OBJ, 0, {read: true, write: false, name: "pvSelfConsumptionSpread", type: "number", unit: "W", def: 0});
-        this.PV_ESTIMATE_WATTS_OBJ = this.root_obj + ".info.pv_generation_estimate_watts";
+        this.PV_ESTIMATE_WATTS_OBJ = this.root_obj + ".pv_generation_estimate_watts";
         createState(this.PV_ESTIMATE_WATTS_OBJ, 0, {read: true, write: false, name: "pvGenerationEstimatePower", type: "number", unit: "W", def: 0});
-        this.PV_ESTIMATE_MAX_WATTS_OBJ = this.root_obj + ".info.pv_generation_max_estimate_watts";
+        this.PV_ESTIMATE_MAX_WATTS_OBJ = this.root_obj + ".pv_generation_max_estimate_watts";
         createState(this.PV_ESTIMATE_MAX_WATTS_OBJ, 0, {read: true, write: false, name: "pvGenerationEstimateMaxPower", type: "number", unit: "W", def: 0});
-        this.SCRIPT_PV_ESTIMATION_MODE_OBJ = this.root_obj + ".info.pv_estimation_mode";
-        createState(this.SCRIPT_PV_ESTIMATION_MODE_OBJ, "MAX", {read: true, write: false, name: "pvPowerEstimationMode", type: "string", def: "MAX"});
-        this.SCRIPT_PV_IS_CURTAILED_OBJ = this.root_obj + ".info.pv_is_curtailed";
-        createState(this.SCRIPT_PV_IS_CURTAILED_OBJ, false, {read: true, write: false, name: "pvIsCurtailed", type: "boolean", def: false});
-        this.PV_IRRADIANCE_ESTIMATE_OBJ = this.root_obj + ".info.irradiance";
+        this.PV_ESTIMATION_MODE_OBJ = this.root_obj + ".pv_estimation_mode";
+        createState(this.PV_ESTIMATION_MODE_OBJ, "MAX", {read: true, write: false, name: "pvPowerEstimationMode", type: "string", def: "MAX"});
+        this.PV_IS_CURTAILED_OBJ = this.root_obj + ".pv_is_curtailed";
+        createState(this.PV_IS_CURTAILED_OBJ, false, {read: true, write: false, name: "pvIsCurtailed", type: "boolean", def: false});
+        this.PV_IRRADIANCE_ESTIMATE_OBJ = this.root_obj + ".irradiance";
         createState(this.PV_IRRADIANCE_ESTIMATE_OBJ, 0, {read: true, write: false, name: "Irradiance Estimate", type: "number", unit: "W/m2", def: 0});
+        this.PV_DAY_EXCESS_ENERGY_OBJ = this.root_obj + ".day_excess_energy";
+        createState(this.PV_DAY_EXCESS_ENERGY_OBJ, 0, {read: true, write: false, name: "Excess Energy Today", type: "number", unit: "Wh", def: 0});
 
+        this.restoreState();
         console.log(`Initialized PV System ${this.name} (${this.PV_PEAK_POWER_WATTS} Wp).`)
     }
     
+    restoreState() {
+        var state = getState(this.PV_DAY_EXCESS_ENERGY_OBJ);
+        if(state) {
+            this.day_excess_energy = state.val;
+        }
+    }
+
     getUpdateIntervalMs() { return this.updateIntervalMs; }
     getSelfConsumption() { return this.self_consumption; }
     getExcessPower() { return this.pv_excess_power; }
@@ -133,6 +141,10 @@ class PVSystem {
 
     }
 
+    resetDayValues() {
+        this.day_excess_energy = 0;
+    }
+
     restartMeasurementPeriod() {
         this.pv_power_max = this.pv_power;
     }
@@ -161,11 +173,10 @@ class PVSystem {
     updateIrradianceEstimate() {
         const POWER_TEMPERATURE_COEFFICIENT = -0.0034; // -0.34% / °C
         const NOMINAL_MODULE_AMBIENT_TEMPERATURE = 20;
+        const NOMINAL_MODULE_IRRADIANCE = 800;
         var power_factor = 1 + (POWER_TEMPERATURE_COEFFICIENT * (this.mppt.getPanelTemperature() - NOMINAL_MODULE_AMBIENT_TEMPERATURE)); 
-        // const PEAK_POWER = 26400; // TODO
-        //var irradiance = (pv_power / (PEAK_POWER * power_factor)) * this.NOMINAL_MODULE_IRRADIANCE;
         const NOMINAL_POWER = 332 * 60; // 60 Panels x 332W at Nominal Conditions
-        this.irradiance = this.pv_power_estimate / (NOMINAL_POWER * power_factor);
+        this.irradiance = (this.pv_power_estimate * NOMINAL_MODULE_IRRADIANCE) / (NOMINAL_POWER * power_factor);
     }
 
     updateMaxPotentialPowerEstimate() {
@@ -198,7 +209,7 @@ class PVSystem {
         if(new_mode != old_mode) {
             console.log("Changing estimation mode from " + old_mode + " to " + new_mode +".");
             this.estimation_mode = new_mode;
-            setState(this.SCRIPT_PV_ESTIMATION_MODE_OBJ, this.estimation_mode, true);
+            setState(this.PV_ESTIMATION_MODE_OBJ, this.estimation_mode, true);
         }
     }
     
@@ -226,6 +237,9 @@ class PVSystem {
         // The estimate guarantees that the potential is always higher than the actual
         // and therefore the unused potential is always >= 0
         var unused_potential_power = potential_pv_power - this.pv_power;
+        if(this.isCurtailed()) {
+            this.day_excess_energy += unused_potential_power * this.getUpdateIntervalMs() / (1000*60*60);
+        }
 
         // Correct the unused potential power by the feed-in above or below the limit.
         // If above, the PV system will regulate down the inverter and the deviation become available as 
@@ -273,11 +287,12 @@ class PVSystem {
         setState(this.PV_ESTIMATE_WATTS_OBJ, this.pv_power_estimate, true);
         setState(this.PV_IRRADIANCE_ESTIMATE_OBJ, this.irradiance, true);
 
-        setState(this.SCRIPT_PV_IS_CURTAILED_OBJ, this.isCurtailed(), true);
+        setState(this.PV_IS_CURTAILED_OBJ, this.isCurtailed(), true);
+        setState(this.PV_DAY_EXCESS_ENERGY_OBJ, this.day_excess_energy, true);
 
         // For the sake of graphing, we floor the excess power at 0
         var pv_available_excess_power = this.pv_excess_power > 0 ? this.pv_excess_power : 0;
-        setState(this.SCRIPT_PV_AVAILABLE_EXCESS_WATTS_OBJ, pv_available_excess_power, true);
+        setState(this.PV_AVAILABLE_EXCESS_WATTS_OBJ, pv_available_excess_power, true);
 
         this.mppt.writeState();
         

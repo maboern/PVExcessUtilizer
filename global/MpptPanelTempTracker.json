@@ -9,7 +9,8 @@
 // Linear Temperature Rise with Power (NOCT model)
 class MpptPanelTempTracker {
     constructor(parent_root_obj) {
-        this.SCRIPT_DEBUG = true;
+        this.SCRIPT_DEBUG = false;
+        this.TEST = true;
 
         this.NOMINAL_MODULE_OPERATING_TEMPERATURE = 42.3; // Cell Temp at 800W/m2 at 20°C ambient with 1m/s wind speed
         this.NOMINAL_MODULE_AMBIENT_TEMPERATURE = 20;
@@ -19,7 +20,7 @@ class MpptPanelTempTracker {
         this.COOLING_TEMPERATURE_DYNAMICS = 0.004;
         this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT = -0.0027; // Delta_U = -0.27% / °C
 
-        this.panel_temperature = 25; // TODO: Restore from state
+        this.panel_temperature = 25; 
         this.ambient_temperature = 20; 
         this.ambient_temperature_sensor_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.AUSSENTEMPERATUR'
 
@@ -34,7 +35,7 @@ class MpptPanelTempTracker {
         var panel_temp_state = getState(this.TEMPERATURE_ESTIMATE_OBJ);
         if(panel_temp_state.ts > Date.now() - 10*60*1000) {
             this.panel_temperature = panel_temp_state.val;
-            console.log("Updating panel temperature from state: " + this.panel_temperature + "°C @ ambient" + this.ambient_temperature + "°C.");
+            console.log("Updating panel temperature from state: " + this.panel_temperature + "°C @ ambient: " + this.ambient_temperature + "°C.");
         }
     }
 
@@ -69,10 +70,11 @@ class MpptPanelTempTracker {
 
     updateAmbientTemperature() {
         var temp_obj = getState(this.ambient_temperature_sensor_obj);
-        if(temp_obj && temp_obj.ts > Date.now() - 60*60*1000) {
+        if(temp_obj && temp_obj.ts > Date.now() - 3*60*60*1000) {
             this.ambient_temperature = temp_obj.val;
         }
     }
+
     writeState() {
         setState(this.TEMPERATURE_ESTIMATE_OBJ, this.panel_temperature, true);
 

@@ -32,7 +32,7 @@ class ControllableLoad {
         this.switch_obj = null;
         this.measured_power_obj = null;
         
-        this.root_obj = this.script_id + '.info.load.' + this.name;
+        this.root_obj = this.script_id + '.load.' + this.name;
         this.total_switch_count_obj = this.root_obj + '.switchCount';
         createState(this.total_switch_count_obj, 0, {read: true, write: false, name: "Total Switch Count", type: "number", unit: "", def: 0});
         this.runtime_secs_obj = this.root_obj + '.runtimeSecs';
@@ -111,7 +111,7 @@ class ControllableLoad {
     }
 
     hasRunForMinimumTime() {
-        return (this.isRunningForMs() > this.min_runtime_secs * 1000);
+        return (this.isRunningForMs() >= this.min_runtime_secs * 1000);
     }
     
     getExpectedPower() {
@@ -145,6 +145,9 @@ class ControllableLoad {
         }   
     }
     
+    allowedToStop() {
+        return (!this.isOn() || this.hasRunForMinimumTime());
+    }
     
     isRunningForMs() {
         if(this.isOn() && this.last_started_at > 0) {
@@ -193,15 +196,15 @@ class ControllableLoad {
 
         if(this.isOn()) {
             if(this.hasRunForMinimumTime()) {
-                if(min_available_power < this.getCurrentPower() - this.load_hysteresis_power){
-                    this.stop(min_available_power);
+                if(max_available_power < this.getCurrentPower() - this.load_hysteresis_power){
+                    this.stop(max_available_power);
                 }
             }
             this.updateRunTime(interval);
         } else {
-            if(max_available_power > this.expected_power + this.load_hysteresis_power) {
+            if(min_available_power > this.expected_power + this.load_hysteresis_power) {
                 if(this.allowedToRun()) {
-                    this.start(max_available_power);
+                    this.start(min_available_power);
                 }
             }
         }

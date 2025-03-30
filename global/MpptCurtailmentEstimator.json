@@ -9,6 +9,7 @@
 class MpptCurtailmentEstimator {
     constructor(parent_root_obj, string_voltage_obj, nr_string_panels) {
         this.SCRIPT_DEBUG = true;
+        this.TEST = true;
         this.MPPT_DYNAMICS = 0.1;
         this.POWER_SMOOTHING_DYNAMICS = 0.01;
 
@@ -26,7 +27,7 @@ class MpptCurtailmentEstimator {
         this.smoothed_panel_voltage = 0;
         this.panel_voltage = 0;
 
-        this.root_obj = parent_root_obj + '.info.mppt';
+        this.root_obj = parent_root_obj + '.mppt';
         this.CURTAILMENT_PERCENT_ESTIMATE_OBJ = this.root_obj + ".curtailment";
         createState(this.CURTAILMENT_PERCENT_ESTIMATE_OBJ, 0, {read: true, write: false, name: "CurtailmentPercentEstimate", type: "number", unit: "%", def: 0});
         this.MPPT_POWER_ESTIMATE_OBJ = this.root_obj + ".power";
@@ -42,9 +43,18 @@ class MpptCurtailmentEstimator {
         this.UNCURTAILED_PANEL_VOLTAGE_TEMPERATURE_OBJ = this.root_obj + ".uncurtailed_panel_voltage_temperature";
         createState(this.UNCURTAILED_PANEL_VOLTAGE_TEMPERATURE_OBJ, 0, {read: true, write: false, name: "UncurtailedPanelVoltageTemperature", type: "number", unit: "°C", def: 0});
 
-
         this.restoreState();
         this.temp_tracker = new MpptPanelTempTracker(this.root_obj);
+
+        if(this.TEST) {
+            // Temperature Voltage Correction Testing
+            this.test_reference_voltage = this.uncurtailed_panel_voltage;
+            this.test_reference_temperature = this.last_uncurtailed_temperature;
+            this.test_reference_power = this.last_uncurtailed_power;
+            this.test_corrected_voltage = this.uncurtailed_panel_voltage;
+            this.TEST_CORR_PANEL_VOLTAGE_OBJ = this.root_obj + ".test_corrected_panel_voltage";
+            createState(this.TEST_CORR_PANEL_VOLTAGE_OBJ, 0, {read: true, write: false, name: "TestCorrectedPanelVoltage", type: "number", unit: "V", def: 0});
+        }
     }
 
     getCurtailmentPercent() { return this.curtailment; }
@@ -58,6 +68,27 @@ class MpptCurtailmentEstimator {
         this.last_uncurtailed_temperature = getState(this.UNCURTAILED_PANEL_VOLTAGE_TEMPERATURE_OBJ).val;
         console.log("Updating uncurtailed panel voltage from state: " + this.uncurtailed_panel_voltage + "V @ " + this.last_uncurtailed_power + "W with " + this.last_uncurtailed_temperature + "°C.");
     }
+
+    calculatePowerVoltageCorrection(reference_power) {
+        // Heuristic data: 12kW => +1.8V => 0.15V/kW. 7kW (slower) => 0.5V => 0.1V/kW => 0.003125V/(W/m2)
+        const PANEL_POWER_VOLTAGE_COEFFICIENT = 0.1 / 1000; // 0.1V/kW
+        return PANEL_POWER_VOLTAGE_COEFFICIENT * (this.getPower() - reference_power);
+    }
+    
+    testVoltageCorrection() {
+        if(Math.floor(Date.now()/1000) % 3600 == 0) {
+            this.test_reference_voltage = this.smoothed_panel_voltage;
+            this.test_reference_temperature = this.getPanelTemperature();
+            this.test_reference_power = this.getPower();
+            log("Updating test reference voltage: " + this.test_reference_voltage + "V @ " + this.test_reference_power + "W with " + this.test_reference_temperature + "°C.");
+        }
+
+        var power_voltage_correction = this.calculatePowerVoltageCorrection(this.test_reference_power);
+        var temperature_corrected_voltage = this.temp_tracker.correctVoltage(this.test_reference_voltage, this.test_reference_temperature);
+        this.test_corrected_voltage = temperature_corrected_voltage + power_voltage_correction;
+        setState(this.TEST_CORR_PANEL_VOLTAGE_OBJ, this.test_corrected_voltage, true);
+    }
+
 
     updateCurtailmentEstimate()
     {
@@ -102,7 +133,9 @@ class MpptCurtailmentEstimator {
 
     updateEstimation(is_curtailed, pv_power) 
     {
-        this.corrected_uncurtailed_voltage = this.temp_tracker.correctVoltage(this.uncurtailed_panel_voltage, this.last_uncurtailed_temperature);
+        var power_voltage_correction = this.calculatePowerVoltageCorrection(this.last_uncurtailed_power);
+        var temperature_corrected_voltage = this.temp_tracker.correctVoltage(this.uncurtailed_panel_voltage, this.last_uncurtailed_temperature);
+        this.corrected_uncurtailed_voltage = temperature_corrected_voltage + power_voltage_correction;
 
         if(!is_curtailed) {
             this.uncurtailed_panel_voltage = this.smoothed_panel_voltage;
@@ -152,5 +185,9 @@ class MpptCurtailmentEstimator {
         setState(this.CURTAILMENT_PERCENT_ESTIMATE_OBJ, this.curtailment * 100, true);
 
         this.temp_tracker.writeState();
+
+        if(this.TEST) {
+            this.testVoltageCorrection();
+        }
     }
 }
