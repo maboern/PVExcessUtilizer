@@ -44,7 +44,7 @@ class ControllableLoad {
 
         this.runtime_secs = getState(this.runtime_secs_obj).val;
     }
-
+//TODO: Restore Day Values from state
     isOn() { return getState(this.switch_obj).val; }
     toString() { return `Load ${this.name} (${this.load_type})`; }
     isReady() { 

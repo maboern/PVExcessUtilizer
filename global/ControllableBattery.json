@@ -11,7 +11,7 @@ class ControllableBattery extends ControllableLoad {
 
         this.capacity_wh = capacity_wh;
         this.max_level_of_charge_percent = 80;
-        this.charging_loss_percent = 15;
+        this.charging_loss_percent = 12;
         this.max_day_runtime_secs = 5400;
         this.startup_time_ms = 60 * 1000;
         this.min_runtime_secs = 5 * 60;

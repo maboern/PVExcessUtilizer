@@ -1,0 +1,60 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+class HeatPumpManager{
+    constructor(root_obj, pv_forecast) {
+        this.root_obj = root_obj + ".heatpump";
+        this.pv_forecast = pv_forecast;
+
+        console.log("Initialized HeatPumpManager.");
+
+        this.boosted_water_temp_obj = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60312';/*Obere warmwasser solltemp*/
+        this.boosted_heating_temp_obj = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60310';/*Obere raum/puffertemp  hk1*/
+        this.emi_active = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60302';
+
+        this.BOILER_POWER = 4000;
+        this.setBoostedValues();
+    }
+    
+    setBoostedValues() {
+        setState(this.boosted_water_temp_obj, 53);
+        setState(this.boosted_heating_temp_obj, 48);
+        setState(this.emi_active, 1);
+        console.log("Setting boosted values (EMI on).");
+    }
+    setDefaultValues() {
+        setState(this.boosted_water_temp_obj, 53);
+        setState(this.boosted_heating_temp_obj, 45);
+        setState(this.emi_active, 1);
+        console.log("Setting default values (EMI on).");
+    }
+    setEconomicValues() {
+        setState(this.boosted_water_temp_obj, 40);
+        setState(this.boosted_heating_temp_obj, 35);
+        setState(this.emi_active, 1);
+        console.log("Setting economic values (EMI on).");
+    }
+    setMinimalValues() {
+        setState(this.boosted_water_temp_obj, 40);
+        setState(this.boosted_heating_temp_obj, 35);
+        setState(this.emi_active, 0);
+        console.log("Setting to minimal values (EMI off).");
+    }
+    updateAtNoon() {
+        this.setBoostedValues();
+    }
+    updateAtSunrise() {
+        if(this.pv_forecast.estimateRemainingExcessToday(this.BOILER_POWER) > 2*60) {
+            this.setMinimalValues();
+        } else {
+            this.setDefaultValues();
+        }
+    }
+    updateHourly() {
+        
+    }
+}

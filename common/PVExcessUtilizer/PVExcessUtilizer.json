@@ -23,10 +23,13 @@ createState(SCRIPT_AVAILABLE_MIN_WATTS_OBJ, 0, {read: true, write: false, name: 
 var SCRIPT_AVAILABLE_MAX_WATTS_OBJ = SCRIPT_ID + ".max_available_watts";
 createState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, 0, {read: true, write: false, name: "Max Available Watts", type: "number", unit: "W", def: 0});
 
-let pv = new PVSystem(SCRIPT_ID, 'Turnerweg');
+let pv_forecast = new PVForecast(SCRIPT_ID, 13200, 4000);
+let pv = new PVSystem(SCRIPT_ID, 'Turnerweg', pv_forecast);
 let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000);
 let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
 let heater = new ControllableHeater(SCRIPT_ID, 'CellarHeater');
+
+let heatpump = new HeatPumpManager(SCRIPT_ID, pv_forecast);
 
 function getRecentStateVal(obj) {
     const SCRIPT_MAX_VALUE_AGE = 60 * 1000;
@@ -122,6 +125,20 @@ function updateControl() {
     controlLoads();
 }
 
+function updateHeatPumpNoon() {
+    heatpump.updateAtNoon();
+}
+schedule('{"time":{"exactTime":true,"start":"solarNoon"},"period":{"days":1}}',updateHeatPumpNoon);
+
+function updateHeatPumpSunrise() {
+    heatpump.updateAtSunrise();
+}
+schedule('{"time":{"exactTime":true,"start":"sunrise"},"period":{"days":1}}', updateHeatPumpSunrise);
+
+function updateHeatPumpHourly() {
+    heatpump.updateHourly();
+}
+schedule('{"time":{"start":"sunrise","end":"sunset","mode":"hours","interval":1},"period":{"days":1}}', updateHeatPumpHourly);
 
 function resetDayValues() {
     console.log("Resetting statistics values of previous day!");
@@ -133,10 +150,14 @@ function resetDayValues() {
 }
 schedule('{"time":{"exactTime":true,"start":"nadir"},"period":{"days":1}}', resetDayValues);
 
-var Interval = setInterval(function () {
+var ControlInterval = setInterval(function () {
   updateControl(); // start processing in interval
 }, (SCRIPT_UPDATE_INTERVAL_SEC*1000));
 
 var PVInterval = setInterval(function () {
   pv.process(); // start processing in interval
 }, (pv.getUpdateIntervalMs()));
+
+var ForecastInterval = setInterval(function () {
+  pv_forecast.process(); // start processing in interval
+}, (pv_forecast.getUpdateIntervalMs()));

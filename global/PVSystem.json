@@ -11,9 +11,10 @@ const PV_POWER_ESTIMATION_MODE = Object.freeze({
 });
 
 class PVSystem {
-    constructor(script_id, name) {
+    constructor(script_id, name, pv_forecast) {
         this.name = name;
         this.root_obj = script_id;
+        this.pv_forecast = pv_forecast;
         this.SCRIPT_DEBUG = false;
         this.updateIntervalMs = 1000;
 
@@ -34,9 +35,6 @@ class PVSystem {
         this.INV10_CONNECTED_OBJ = this.INV10_MODBUS_ID + '.info.connection';
         this.INV10_CUR_POWER_WATTS_OBJ = this.INV10_MODBUS_ID + '.inputRegisters.60776_Measurement_GridMs_TotW';
         this.inv10_power = 0;
-
-        // PV Forecast from API (Solcast / Forecast.solar)
-        this.PV_FORECAST_POWER_NOW_OBJ = 'pvforecast.1.summary.power.now';
 
         // Static PV System Parameters
         this.PV_PEAK_POWER_WATTS = 26400;
@@ -183,9 +181,9 @@ class PVSystem {
         this.updateShadingLossEstimate();
         this.fadeGenerationMax();
 
-        var pv_forecast = getState(this.PV_FORECAST_POWER_NOW_OBJ).val;
-        pv_forecast -= this.pv_shading_loss;
-        this.pv_max_power_estimate = pv_forecast;
+        var forecast = this.pv_forecast.now();
+        forecast -= this.pv_shading_loss;
+        this.pv_max_power_estimate = forecast;
         if(this.isCurtailed()) {
             // We are being curtailed
             if(this.pv_power_max > this.pv_max_power_estimate) {
@@ -196,6 +194,11 @@ class PVSystem {
                 // We have observed higher PV power earlier, but faded by time since then. 
                 // We trust it more than the current forecast or max if it is higher.
                 this.pv_max_power_estimate = this.pv_power_fading_max;
+            }
+            if(this.mppt.getPower() > this.pv_max_power_estimate) {
+                // If still the MPPT tracking yields a higher estimate, use that
+                // for the maximum estimation even if unreliable.
+                this.pv_max_power_estimate = this.mppt.getPower();
             }
         } else {
             // Generation not curtailed because feed-in limit not reached

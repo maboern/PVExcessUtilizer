@@ -16,7 +16,8 @@ class ControllableBoiler extends ControllableLoad {
         this.startup_time_ms = 5 * 1000;
         this.max_day_runtime_secs = 4*60*60;
         this.boiler_temperature = 0;
-        this.boiler_max_temperature = 54; // Heating element stops at ~55°C
+        this.boiler_max_temperature = 55; // Heating element stops at ~55°C
+        this.min_break_after_self_shutoff_secs = 45*60; 
 
         this.boiler_temperature_sensor_obj = 'stiebel-isg.0.info.ANLAGE.WARMWASSER.ISTTEMPERATUR';
 
@@ -38,8 +39,13 @@ class ControllableBoiler extends ControllableLoad {
         return this.boiler_temperature >= this.boiler_max_temperature;
     }
 
+    allowedToRunAgainAfterSelfShutoff() {
+        // Allow the water in the boiler to organize itself into layers before starting heating element again.
+        return (this.self_shutoff_at == 0 || ((Date.now() - this.self_shutoff_at) > this.min_break_after_self_shutoff_secs * 1000));
+    } 
+
     allowedToRun() {
         // Not allowed to run if it has shut itself off (due to temperature being reached) today
-        return (super.allowedToRun() && this.self_shutoff_at == 0 && !this.hasReachedMaxTemperature())
+        return (super.allowedToRun() && !this.hasReachedMaxTemperature() && this.allowedToRunAgainAfterSelfShutoff())
     }
 }

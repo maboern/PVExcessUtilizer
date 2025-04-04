@@ -8,7 +8,7 @@
 // PV curtailment estimate from Inverter MPPT (Maximum Power Point Tracking) via measured Panel voltage
 class MpptCurtailmentEstimator {
     constructor(parent_root_obj, string_voltage_obj, nr_string_panels) {
-        this.SCRIPT_DEBUG = true;
+        this.SCRIPT_DEBUG = false;
         this.TEST = true;
         this.MPPT_DYNAMICS = 0.1;
         this.POWER_SMOOTHING_DYNAMICS = 0.01;
@@ -80,7 +80,9 @@ class MpptCurtailmentEstimator {
             this.test_reference_voltage = this.smoothed_panel_voltage;
             this.test_reference_temperature = this.getPanelTemperature();
             this.test_reference_power = this.getPower();
-            log("Updating test reference voltage: " + this.test_reference_voltage + "V @ " + this.test_reference_power + "W with " + this.test_reference_temperature + "°C.");
+            if(this.SCRIPT_DEBUG) {
+                log("Updating test reference voltage: " + this.test_reference_voltage + "V @ " + this.test_reference_power + "W with " + this.test_reference_temperature + "°C.");
+            }
         }
 
         var power_voltage_correction = this.calculatePowerVoltageCorrection(this.test_reference_power);

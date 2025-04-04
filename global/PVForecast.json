@@ -1,0 +1,114 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+class PVForecast {
+    constructor(root_obj, feedin_limit_power, default_load_power) {
+        this.root_obj = root_obj + '.forecast';
+        this.DEBUG = false;
+
+        this.update_interval_ms = 5*60*1000;
+        this.base_power_reserve = 2000 + 600; // ~600W background power + 1 major device as tolerance
+        this.feedin_limit_power = feedin_limit_power;
+        this.default_load_power = default_load_power;
+        this.excess_power_threshold = this.feedin_limit_power + this.base_power_reserve; 
+
+        this.cur_forecast = this.getForecast(new Date());
+        this.day_excess_minutes_remaining = 0;
+
+        // PV Forecast from API (Solcast / Forecast.solar)
+        this.PV_FORECAST_POWER_NOW_OBJ = 'pvforecast.1.summary.power.now';
+        this.PV_FORECAST_TODAY_HOURS_BASE_OBJ = 'pvforecast.1.summary.power.hoursToday';
+
+        this.FORECAST_CUR_WATTS_OBJ = this.root_obj + ".power_now";
+        createState(this.FORECAST_CUR_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentPower", type: "number", unit: "W", def: 0});
+
+        this.estimateRemainingExcessToday(this.default_load_power);
+        console.debug("Initialized PVForecast.");
+    }
+
+    getUpdateIntervalMs() { return this.update_interval_ms; }
+
+    estimateRemainingExcessToday(controllable_load_power) {
+        var datetime = new Date();
+        
+        const STEP_SIZE_MINUTES = 30;
+        var total_excess_energy = 0;
+        var total_excess_minutes = 0;
+        while(datetime.getHours() <= 21) {
+            var slot_power = this.getForecast(datetime);
+            var hour_excess_power = slot_power - this.excess_power_threshold - controllable_load_power;
+            if(hour_excess_power > 0) {
+                total_excess_energy += hour_excess_power * (STEP_SIZE_MINUTES/60); // Energy in Wh
+                total_excess_minutes += STEP_SIZE_MINUTES;
+            }
+            datetime = addMinutes(datetime, STEP_SIZE_MINUTES);
+        }
+
+        console.log("Estimating " + Math.round(total_excess_energy/1000) + "kWh of excess for a " + controllable_load_power/1000 + "kW load across " + total_excess_minutes + " minutes remaining today.");
+        return total_excess_minutes;
+    }
+
+    loadSampleTimeForecast(sample_time) {
+        var obj = this.PV_FORECAST_TODAY_HOURS_BASE_OBJ + "." + sample_time;
+        return getState(obj).val;
+    }
+
+    toSampleTime(hour, half_hour) {
+        let padded_hour = ('0' + hour).slice(-2);
+        let padded_half_hours = ('0' + half_hour).slice(-2);
+        return padded_hour + ":" + padded_half_hours + ":00";
+    }
+
+    getForecast(datetime) {
+        let hour = datetime.getHours();
+        let minute = datetime.getMinutes();
+        if(hour < 5 || hour > 21) {
+            // No solar power outside of forecast hours
+            return 0;
+        }
+
+        // Assuming half-hour values
+        let prev_hour = hour;
+        let prev_half_hours = Math.floor(minute / 30) * 30;
+
+        let next_hour = hour;
+        let next_half_hours = Math.ceil(minute / 30) * 30;
+        if(next_half_hours == 60) {
+            next_hour = next_hour + 1;
+            next_half_hours = 0;
+        }
+        
+        let prev_sample_time = this.toSampleTime(prev_hour, prev_half_hours);
+        let prev_forecast = this.loadSampleTimeForecast(prev_sample_time);
+        let next_sample_time = this.toSampleTime(next_hour, next_half_hours);
+        let next_forecast = this.loadSampleTimeForecast(next_sample_time);
+
+        // Linear Interpolation between prev and next sample
+        let fraction = (minute % 30) / 30;
+        let interpolated_forecast = prev_forecast * (1-fraction) + next_forecast * fraction;
+        return interpolated_forecast;
+    }
+
+    now() {
+        return getState(this.PV_FORECAST_POWER_NOW_OBJ).val;
+        //return this.cur_forecast;
+    }
+
+    process() {
+        const now = new Date();
+        this.cur_forecast = this.getForecast(now);
+
+
+        this.day_excess_minutes_remaining = this.estimateRemainingExcessToday(this.default_load_power);
+
+        this.writeState();
+    }
+
+    writeState() {
+        setState(this.FORECAST_CUR_WATTS_OBJ, this.cur_forecast, true);
+    }
+}
