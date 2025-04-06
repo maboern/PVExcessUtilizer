@@ -5,10 +5,18 @@
   "verbose": false
 }
 -- do not edit previous lines - END --*/
+const WARMWATER_STRATEGY = Object.freeze({
+    HEATPUMP_GREEDY : "HEATPUMP GREEDY", // Default: EMI on all day, use surplus early as available and do not consider excess
+    HEATPUMP_ECONOMIC : "HEATPUMP ECONOMIC", // No boost at all, let it run run to minimal temperature
+    EXCESS_ONLY : "EXCESS ONLY", // Only use excess solar energy (via Boiler load) to make warm water, no Heat Pump
+    HYBRID : "HYBRID", // Use Heatpump for minimal temperature, then boost opportunistically with excess solar
+});
+
 class HeatPumpManager{
-    constructor(root_obj, pv_forecast) {
+    constructor(root_obj, pv_forecast, boiler) {
         this.root_obj = root_obj + ".heatpump";
         this.pv_forecast = pv_forecast;
+        this.boiler = boiler;
 
         console.log("Initialized HeatPumpManager.");
 
@@ -16,8 +24,18 @@ class HeatPumpManager{
         this.boosted_heating_temp_obj = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60310';/*Obere raum/puffertemp  hk1*/
         this.emi_active = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60302';
 
+        
+
         this.BOILER_POWER = 4000;
         this.setBoostedValues();
+    }
+
+    getEnergyRequired(target_temperature) {
+        var temperature_diff = target_temperature - this.boiler.getTemperature();
+        if(temperature_diff < 0) {
+            temperature_diff = 0;
+        }
+
     }
     
     setBoostedValues() {
@@ -55,6 +73,6 @@ class HeatPumpManager{
         }
     }
     updateHourly() {
-        
+      
     }
 }

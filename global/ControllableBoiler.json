@@ -28,6 +28,10 @@ class ControllableBoiler extends ControllableLoad {
         return super.toString() + ": " + this.expected_power + "W";
     }
 
+    getTemperature() {
+        return this.boiler_temperature;
+    }
+
     updateTemperature() {
         var temp_obj = getState(this.boiler_temperature_sensor_obj);
         if(temp_obj && temp_obj.ts > Date.now() - 3*60*60*1000) {

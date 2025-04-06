@@ -29,7 +29,7 @@ let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000);
 let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
 let heater = new ControllableHeater(SCRIPT_ID, 'CellarHeater');
 
-let heatpump = new HeatPumpManager(SCRIPT_ID, pv_forecast);
+let heatpump = new HeatPumpManager(SCRIPT_ID, pv_forecast, boiler);
 
 function getRecentStateVal(obj) {
     const SCRIPT_MAX_VALUE_AGE = 60 * 1000;
