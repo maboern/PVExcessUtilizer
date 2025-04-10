@@ -52,6 +52,10 @@ class RingBuffer {
         return Math.min.apply(Math, this.buffer);
     }
 
+    avg() {
+        return this.buffer.reduce((p,c,_,a) => p + c/a.length, 0);
+    }
+
     spread() {
         return this.max() - this.min();
     }

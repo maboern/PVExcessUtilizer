@@ -62,9 +62,10 @@ class PVSystem {
         this.pv_feedin_limit_deviation = 0;
         this.pv_feedin_power_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.self_consumption = 0;
+        this.self_consumption_smoothed = 0;
         this.self_consumption_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.pv_excess_power = 0;
-        this.pv_excess_power_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS)
+        this.pv_excess_power_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.pv_excess_power_smoothed = 0;
         this.pv_shading_loss = 0;
         this.irradiance = 0;
@@ -111,6 +112,7 @@ class PVSystem {
 
     getUpdateIntervalMs() { return this.updateIntervalMs; }
     getSelfConsumption() { return this.self_consumption; }
+    getSelfConsumptionSmoothed() { return this.self_consumption_smoothed; }
     getExcessPower() { return this.pv_excess_power; }
     getMaxExcessPower() { return this.pv_excess_power_buffer.max(); }
     getMinExcessPower() { return this.pv_excess_power_buffer.min(); }
@@ -266,11 +268,13 @@ class PVSystem {
         this.pv_feedin_power_buffer.push(this.feedin_power);
 
         this.self_consumption = this.pv_power - this.feedin_power;
+        this.self_consumption_smoothed = smooth(this.self_consumption_smoothed, this.self_consumption, 0.3);
         this.self_consumption_buffer.push(this.self_consumption);
 
         this.updateIrradianceEstimate();
         this.mppt.process(this.irradiance);
         this.updateEstimation();
+        this.pv_forecast.updateMeasurement(this.pv_power_estimate);
         if(Math.floor(Date.now()/1000) % 5 == 0) { //TODO
             this.writeState();
         }

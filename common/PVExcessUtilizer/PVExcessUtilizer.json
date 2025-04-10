@@ -66,21 +66,18 @@ function checkReady() {
     }
 }
 
-
-function controlLoads() 
-{
-    boiler.validateRunning(pv.getSelfConsumption());
-    jackery.validateRunning(pv.getSelfConsumption());
-    heater.validateRunning(pv.getSelfConsumption());
-
-    var cur_total_load_power = 0;
+function updateTotalLoadPower() {
+    let cur_total_load_power = 0;
 
     cur_total_load_power += heater.getCurrentPower();
     cur_total_load_power += boiler.getCurrentPower();
     cur_total_load_power += jackery.getCurrentPower();
     setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
+    return cur_total_load_power;
+}
 
-    var cur_disposable_load_power = 0;
+function calculateDisposableLoadPower() {
+    let cur_disposable_load_power = 0;
     if(heater.allowedToStop()) {
         cur_disposable_load_power += heater.getCurrentPower();
     }
@@ -90,17 +87,22 @@ function controlLoads()
     if(jackery.allowedToStop()) {
         cur_disposable_load_power += jackery.getCurrentPower();
     }
+    return cur_disposable_load_power;
+}
 
-
-    var min_available_power = pv.getMinExcessPower() + cur_disposable_load_power;
-    setState(SCRIPT_AVAILABLE_MIN_WATTS_OBJ, min_available_power, true);
-    var max_available_power = pv.getMaxExcessPower() + cur_disposable_load_power;
-    setState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, max_available_power, true);
-    
-    if(SCRIPT_DEBUG) {
-        log("Excess: " + pv.getExcessPower() + "W; Available: (Min: " + min_available_power + "W, Max: " + max_available_power + "W).", 'silly');
+function validateRunning(cur_total_load_power) {
+    var non_load_power = pv.getSelfConsumptionSmoothed() - cur_total_load_power;
+    if(non_load_power < 0) 
+    {
+        console.log("Negative remaining non-load power: " + non_load_power + "! (Self-Consumption smoothed: " + pv.getSelfConsumptionSmoothed() + ", Loads: " + cur_total_load_power + ")");
     }
+    boiler.validateRunning(non_load_power);
+    jackery.validateRunning(non_load_power);
+    heater.validateRunning(non_load_power);
+}
 
+function updateLoadControl(min_available_power, max_available_power)
+{
     // TODO: Calculate Confidence Level from Generation Nowcast (Power - Forecast)
     // and Consumption Forecast (SEMP / maybe Statistics)
     boiler.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
@@ -117,6 +119,25 @@ function controlLoads()
     var expected_jackery_power = jackery.isOn() ? jackery.getExpectedPower() : 0;
     min_available_power -= expected_jackery_power;
     max_available_power -= expected_jackery_power; 
+
+    heatpump.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
+}
+
+function controlLoads() 
+{
+    updateTotalLoadPower();
+    let cur_disposable_load_power = calculateDisposableLoadPower();
+
+    var min_available_power = pv.getMinExcessPower() + cur_disposable_load_power;
+    setState(SCRIPT_AVAILABLE_MIN_WATTS_OBJ, min_available_power, true);
+    var max_available_power = pv.getMaxExcessPower() + cur_disposable_load_power;
+    setState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, max_available_power, true);
+    
+    if(SCRIPT_DEBUG) {
+        log("Excess: " + pv.getExcessPower() + "W; Available: (Min: " + min_available_power + "W, Max: " + max_available_power + "W).", 'silly');
+    }
+
+    updateLoadControl(min_available_power, max_available_power);
 }
 
 function updateControl() {
@@ -125,20 +146,20 @@ function updateControl() {
     controlLoads();
 }
 
-function updateHeatPumpNoon() {
-    heatpump.updateAtNoon();
-}
-schedule('{"time":{"exactTime":true,"start":"solarNoon"},"period":{"days":1}}',updateHeatPumpNoon);
-
-function updateHeatPumpSunrise() {
+function atSunrise() {
     heatpump.updateAtSunrise();
 }
-schedule('{"time":{"exactTime":true,"start":"sunrise"},"period":{"days":1}}', updateHeatPumpSunrise);
+schedule('{"time":{"exactTime":true,"start":"sunrise"},"period":{"days":1}}', atSunrise);
 
-function updateHeatPumpHourly() {
+function atSunset() {
+    heatpump.updateAtSunset();
+}
+schedule('{"time":{"exactTime":true,"start":"sunset"},"period":{"days":1}}',atSunset);
+
+function hourly() {
     heatpump.updateHourly();
 }
-schedule('{"time":{"start":"sunrise","end":"sunset","mode":"hours","interval":1},"period":{"days":1}}', updateHeatPumpHourly);
+schedule('{"time":{"start":"sunrise","end":"sunset","mode":"hours","interval":1},"period":{"days":1}}', hourly);
 
 function resetDayValues() {
     console.log("Resetting statistics values of previous day!");

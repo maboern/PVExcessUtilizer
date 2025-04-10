@@ -111,7 +111,7 @@ class MpptCurtailmentEstimator {
 
     uncurtailedVoltageIsStale() {
         const CURTAILMENT_VOLTAGE_ESTIMATE_STALENESS_TIMOUT_MS = 2*60*60*1000;
-        const NORM_POWER_LEVEL_CHANGE = 2000;
+        const NORM_POWER_LEVEL_CHANGE = 5000;
         
         // The uncurtailed MPTT voltage is highly temperature-dependent, in addition
         // to having some correlation with irradiance. If we operate a prolonged time

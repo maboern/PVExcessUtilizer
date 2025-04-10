@@ -10,14 +10,15 @@ class ControllableBoiler extends ControllableLoad {
         super(script_id, name, CONTROLLABLE_LOAD_TYPE.BOILER);
 
         this.expected_power = 4000;
-        this.load_hysteresis_power = 250;
+        this.load_hysteresis_power = 500;
         this.is_connected_obj = 'modbus.2.info.connection';;
         this.switch_obj = 'modbus.2.coils.0_DO-00';
-        this.startup_time_ms = 5 * 1000;
+        this.startup_time_ms = 15 * 1000;
         this.max_day_runtime_secs = 4*60*60;
         this.boiler_temperature = 0;
         this.boiler_max_temperature = 55; // Heating element stops at ~55°C
         this.min_break_after_self_shutoff_secs = 45*60; 
+        this.boiler_volume = 500; // Boiler Capacity Volume
 
         this.boiler_temperature_sensor_obj = 'stiebel-isg.0.info.ANLAGE.WARMWASSER.ISTTEMPERATUR';
 
@@ -25,11 +26,13 @@ class ControllableBoiler extends ControllableLoad {
     }
 
     toString() {
-        return super.toString() + ": " + this.expected_power + "W";
+        return super.toString() + ": " + this.boiler_volume + "l, " + this.expected_power + "W";
     }
 
-    getTemperature() {
-        return this.boiler_temperature;
+    getVolume() { return this.boiler_volume; }
+    getTemperature() { 
+        this.updateTemperature();
+        return this.boiler_temperature;  
     }
 
     updateTemperature() {
@@ -40,7 +43,7 @@ class ControllableBoiler extends ControllableLoad {
     }
     hasReachedMaxTemperature() {
         this.updateTemperature();
-        return this.boiler_temperature >= this.boiler_max_temperature;
+        return this.getTemperature() >= this.boiler_max_temperature;
     }
 
     allowedToRunAgainAfterSelfShutoff() {

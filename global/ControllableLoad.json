@@ -18,7 +18,7 @@ class ControllableLoad {
         this.SCRIPT_DEBUG = false;
         this.load_type = load_type;
         this.expected_power = 0;
-        this.load_hysteresis_power = 250;
+        this.load_hysteresis_power = 500;
         this.startup_time_ms = 10 * 1000;
         this.min_runtime_secs = 0;
 
@@ -42,9 +42,14 @@ class ControllableLoad {
         this.day_energy_obj = this.root_obj + '.dayEnergy';
         createState(this.day_energy_obj, 0, {read: true, write: false, name: "Load Day Energy", type: "number", unit: "Wh", def: 0});
 
-        this.runtime_secs = getState(this.runtime_secs_obj).val;
+        this.restoreState();
     }
-//TODO: Restore Day Values from state
+
+    restoreState() {
+        this.runtime_secs = getState(this.runtime_secs_obj).val;
+        this.day_energy = getState(this.day_energy_obj).val;
+    }
+
     isOn() { return getState(this.switch_obj).val; }
     toString() { return `Load ${this.name} (${this.load_type})`; }
     isReady() { 
@@ -83,7 +88,7 @@ class ControllableLoad {
 
     start(available_power) {
         if(this.allowedToRun()) {
-            console.log("Turning ON Load " + this.name + "! (Surplus: " + available_power + "W)");
+            console.log("Turning ON Load " + this.name + ". (Surplus: " + available_power + "W)");
             setState(this.switch_obj, true);
 
             var switchCount = getState(this.total_switch_count_obj).val;
@@ -92,7 +97,7 @@ class ControllableLoad {
             this.last_started_at = Date.now();
             return true;
         } else {
-            console.log("Cannot turn ON Load + " + this.name + ": Not allowed to run.");
+            console.log("Cannot turn on Load + " + this.name + ": Not allowed to run.");
             return false;
         }
     }
@@ -102,7 +107,7 @@ class ControllableLoad {
         if(available_power > 0) {
             reason = "(Available Power: " + available_power + "W)";
         }
-        console.log("Turning OFF Load " + this.name + "! " + reason);
+        console.log("Turning OFF Load " + this.name + ". " + reason);
         setState(this.switch_obj, false);
     }
 
@@ -161,7 +166,10 @@ class ControllableLoad {
         // the expected power or has turned itself off
         if(this.measured_power_obj && this.getMeasuredPower() > 0) {
             return true;
-        } else if(non_load_consumption >= this.expected_power) {
+        } else if(non_load_consumption >= 0) {
+            // The non-load consumption already has subtracted the expected consumption of
+            // unmeasured loads. So only if we have a deficit here, we expect that 
+            // we may not be running
             return true;
         } else if(!this.hasStartedUp()) {
             return true;
@@ -177,7 +185,7 @@ class ControllableLoad {
                 this.stop(0);
                 return false;
             } else if(!this.validateDrawingPower(non_load_consumption)) {
-                console.log("Load " + this.name + " is drawing too little to be running (" + non_load_consumption + "W / " + this.expected_power + "W).");
+                console.log("Load " + this.name + " is drawing too little to be running (Non-load:" + non_load_consumption + "W / " + this.expected_power + "W).");
                 this.self_shutoff_at = Date.now();
                 this.stop(0);
                 return false;

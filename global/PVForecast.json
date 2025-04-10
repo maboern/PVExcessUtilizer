@@ -16,19 +16,24 @@ class PVForecast {
         this.default_load_power = default_load_power;
         this.excess_power_threshold = this.feedin_limit_power + this.base_power_reserve; 
 
-        // 30% reduction of forecast at 17:00, starting from 10:00
-        this.dampening = 0.30; 
-        this.dampening_peak_hour = 17;
-        this.dampening_start_hour = 10;
-        this.dampening_slope = this.dampening / (this.dampening_peak_hour - this.dampening_start_hour);
+        // General Reduction of forecast at 17:00, starting from 10:00
+        this.afternoon_dampening = 0.0; 
+        this.afternoon_dampening_peak_hour = 17;
+        this.afternoon_dampening_start_hour = 10;
+        this.afternoon_dampening_slope = this.afternoon_dampening / (this.afternoon_dampening_peak_hour - this.afternoon_dampening_start_hour);
 
-        this.cur_forecast = this.getForecast(new Date());
-        this.day_excess_minutes_remaining = 0;
+        // Primary lookback buffer for per-second measurements until next update interval
+        this.power_measurement_lookback = new RingBuffer(this.update_interval_ms/1000); 
+        // Second aggregation of update interval average buckets to 1 hour
+        this.power_measurement_bucket_loockback = new RingBuffer(60*60*1000/this.update_interval_ms);
 
         // PV Forecast from API (Solcast / Forecast.solar)
         this.PV_FORECAST_BASE = 'pvforecast.1.summary';
         this.PV_FORECAST_POWER_NOW_OBJ = this.PV_FORECAST_BASE + '.power.now';
         this.PV_FORECAST_TODAY_HOURS_BASE_OBJ = this.PV_FORECAST_BASE + '.power.hoursToday';
+        
+        this.cur_forecast = this.getForecast(new Date());
+        this.day_excess_minutes_remaining = 0;
 
         this.FORECAST_CUR_WATTS_OBJ = this.root_obj + ".power_now";
         createState(this.FORECAST_CUR_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentPower", type: "number", unit: "W", def: 0});
@@ -54,7 +59,7 @@ class PVForecast {
             datetime = addMinutes(datetime, STEP_SIZE_MINUTES);
         }
 
-        console.log("Forecasting " + Math.round(total_excess_energy/1000) + "kWh of excess for a " + controllable_load_power/1000 + "kW load across " + total_excess_minutes + " minutes remaining today.");
+        if(this.DEBUG) { console.log("Forecasting " + Math.round(total_excess_energy/1000) + "kWh of excess for a " + controllable_load_power/1000 + "kW load across " + total_excess_minutes + " minutes remaining today."); }
         return total_excess_minutes;
     }
 
@@ -73,9 +78,9 @@ class PVForecast {
         let fractional_hour = hour + (minute / 60);
 
         var corrected_forecast = forecast;
-        if(fractional_hour > this.dampening_start_hour) {
-            let peak_distance = Math.abs(this.dampening_peak_hour - fractional_hour);
-            let dampening = this.dampening - (peak_distance * this.dampening_slope);
+        if(fractional_hour > this.afternoon_dampening_start_hour) {
+            let peak_distance = Math.abs(this.afternoon_dampening_peak_hour - fractional_hour);
+            let dampening = this.afternoon_dampening - (peak_distance * this.afternoon_dampening_slope);
             corrected_forecast = forecast * (1 - dampening);
         }
 
@@ -117,7 +122,23 @@ class PVForecast {
         return this.cur_forecast;
     }
 
+    updateMeasurement(pv_power_estimate) {
+        this.power_measurement_lookback.push(pv_power_estimate);
+    }
+
+    aggregateMeasurements() {
+        let interval_power_avg = this.power_measurement_lookback.avg();
+        this.power_measurement_bucket_loockback.push(interval_power_avg);
+        
+    }
+
+    getLastHourAverageMeasuredPower() { 
+        return this.power_measurement_bucket_loockback.avg();
+    }
+
     process() {
+        this.aggregateMeasurements();
+
         let now = new Date();
         this.cur_forecast = this.getForecast(now);
 
