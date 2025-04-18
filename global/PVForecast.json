@@ -15,6 +15,7 @@ class PVForecast {
         this.feedin_limit_power = feedin_limit_power;
         this.default_load_power = default_load_power;
         this.excess_power_threshold = this.feedin_limit_power + this.base_power_reserve; 
+        this.surplus_power_threshold = this.base_power_reserve; 
 
         // General Reduction of forecast at 17:00, starting from 10:00
         this.afternoon_dampening = 0.0; 
@@ -44,23 +45,31 @@ class PVForecast {
     getUpdateIntervalMs() { return this.update_interval_ms; }
 
     estimateRemainingExcessToday(controllable_load_power) {
+        return this.estimateRemainingToday(controllable_load_power, this.excess_power_threshold);
+    }
+
+    estimateRemainingSurplusToday(controllable_load_power) {
+        return this.estimateRemainingToday(controllable_load_power, this.surplus_power_threshold);
+    }
+
+    estimateRemainingToday(controllable_load_power, power_threshold) {
         var datetime = new Date();
         
         const STEP_SIZE_MINUTES = 5;
-        var total_excess_energy = 0;
-        var total_excess_minutes = 0;
+        var total_extra_energy = 0;
+        var total_extra_minutes = 0;
         while(datetime.getHours() <= 21) {
             var slot_power = this.getForecast(datetime);
-            var excess_power = slot_power - this.excess_power_threshold;
-            if(excess_power >= controllable_load_power) {
-                total_excess_energy += excess_power * (STEP_SIZE_MINUTES/60); // Energy in Wh
-                total_excess_minutes += STEP_SIZE_MINUTES;
+            var extra_power = slot_power - power_threshold;
+            if(extra_power >= controllable_load_power) {
+                total_extra_energy += extra_power * (STEP_SIZE_MINUTES/60); // Energy in Wh
+                total_extra_minutes += STEP_SIZE_MINUTES;
             }
             datetime = addMinutes(datetime, STEP_SIZE_MINUTES);
         }
 
-        if(this.DEBUG) { console.log("Forecasting " + Math.round(total_excess_energy/1000) + "kWh of excess for a " + controllable_load_power/1000 + "kW load across " + total_excess_minutes + " minutes remaining today."); }
-        return total_excess_minutes;
+        if(this.DEBUG) { console.log("Forecasting " + Math.round(total_extra_energy/1000) + "kWh above " + power_threshold/1000 + "kW for a " + controllable_load_power/1000 + "kW load across " + total_extra_minutes + " minutes remaining today."); }
+        return total_extra_minutes;
     }
 
     loadSampleTimeForecast(sample_time) {
@@ -129,7 +138,6 @@ class PVForecast {
     aggregateMeasurements() {
         let interval_power_avg = this.power_measurement_lookback.avg();
         this.power_measurement_bucket_loockback.push(interval_power_avg);
-        
     }
 
     getLastHourAverageMeasuredPower() { 

@@ -9,7 +9,7 @@ const HEATPUMP_STRATEGY = Object.freeze({
     PASSIVE : "PASSIVE",  // Nothing to actively manage for the heatpump / boiler. This is the default.
     HEATPUMP_GREEDY : "HEATPUMP GREEDY", // Original Default: EMI on, use surplus early as available and do not consider excess unless by coincidence.
     HEATPUMP_ECONOMIC : "HEATPUMP ECONOMIC", // No boost at all, let it run run to minimal temperature
-    HEATPUMP_AFTERNOON_GREEDY : "AFTERNOON GREEDY", // Run economic in the morning, use potential excess over noon and into the afternoon if necessary.
+    AFTERNOON_GREEDY : "AFTERNOON GREEDY", // Run economic in the morning, use potential excess over noon and into the afternoon if necessary.
     EXCESS_ONLY : "EXCESS ONLY", // Only use excess solar energy (via Boiler load) to make warm water, no Heat Pump unless we do not make it
     HYBRID : "HYBRID" // Use Heatpump for minimal temperature, then boost opportunistically with excess solar
 });
@@ -23,29 +23,46 @@ class HeatPumpManager{
         this.DEBUG = false;
 
         this.heating_buffer_temp_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.PUFFERISTTEMPERATUR'/*Pufferisttemperatur*/
+        this.summer_mode_obj = 'stiebel-isg.0.info.STATUSANLAGE.BETRIEBSSTATUS.SOMMERBETRIEB';
 
         this.strategy = HEATPUMP_STRATEGY.PASSIVE;
-        this.emi_settings = new HeatPumpEmiSettings();
+        this.strategy_chosen = false;
+        this.emi_settings = new HeatPumpEmiSettings(HEATPUMP_EMI_SETTINGS.DEFAULT, this.root_obj);
+        this.required_boiler_runtime = 0;
+        this.required_warmwater_runtime = 0; // TODO: Replace with heatpump calculation
+        this.required_heating_runtime = 0;
+        this.remaining_boiler_excess_time = 0;
+        this.remaining_heating_excess_time = 0; 
+        this.remaining_warmwater_surplus_time = 0;
+        this.remaining_heating_surplus_time = 0;
 
-        this.load_grace_period_mins = 15; // Grace period / tolerance for switching on loads before the excess / surplus energy window passes
-        this.boosted_warmwater_temp = 53;
-        this.boosted_heating_temp = 48; 
+        this.excess_load_grace_period_mins = 15; // Grace period / tolerance for switching on loads before the excess / surplus energy window passes
+        this.surplus_load_grace_period_mins = 60; // Grace period / tolerance for switching on loads before the excess / surplus energy window passes
+        
+        this.min_heatpump_runtime_mins = 5; // Do not start the heatpump if it is expected to run less than that time.
         this.heating_buffer_volume = 400; // 400 l
         // TODO: Make temperature-dependent.
-        this.heating_expected_power = 3800; // The SHM pretty much goes to max power as long as there is surplus. TODO: Correct once we control it ourselves.
+        this.heating_expected_power = 3500; // The SHM pretty much goes to max power as long as there is surplus. TODO: Correct once we control it ourselves.
+        this.warmwater_expected_power = 4000;
         this.heatpump_efficiency_factor = 4 // How much heat energy the heat pump gets out for putting electric energy in
 
         this.STRATEGY_OBJ = this.root_obj + ".strategy";
         createState(this.STRATEGY_OBJ, this.strategy, {read: true, write: false, name: "Strategy", type: "string", def: "UNKNOWN"});
         
-        this.restoreState()
-        console.log("Initialized HeatPumpManager.");
+        this.restoreState();
+        this.updateState();
+        this.reportStatus();
     }
 
     restoreState() {
         this.strategy = getState(this.STRATEGY_OBJ).val;
-        //TODO: Restore EMI Settings
+        this.strategy_chosen = isToday(getState(this.STRATEGY_OBJ).ts); 
+        this.emi_settings.restoreState();
         console.log("Restored from state: Strategy = " + this.strategy + "");
+    }
+
+    resetDayValues() {
+        this.strategy_chosen = false;
     }
 
     calculateHeatingRunMinsRequired(target_temperature) {
@@ -54,8 +71,21 @@ class HeatPumpManager{
         return Math.round(time_hours * 60);
     }
 
+    isInSummerMode() {
+        if(isState(this.summer_mode_obj)) {
+            let summer_mode_state = getState(this.summer_mode_obj);
+            if(summer_mode_state && summer_mode_state.val == true) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     calculateHeatingEnergyRequired(target_temperature) {
-        // TODO: Exclude Sommerbetrieb (detect via SOLLWERT = 0?)
+        if(this.isInSummerMode()) {
+            return 0;
+        }
+        
         let buffer_temperature = getState(this.heating_buffer_temp_obj).val;
         var temperature_diff = target_temperature - buffer_temperature;
         if(temperature_diff < 0) {
@@ -67,63 +97,85 @@ class HeatPumpManager{
         return required_energy_kwh;
     }
 
+    calculateWarmWaterRunMinsRequired(target_temperature) {
+        var energy_kwh = this.calculateWarmWaterEnergyRequired(target_temperature);
+        var time_hours = (energy_kwh * 1000) / (this.warmwater_expected_power * this.heatpump_efficiency_factor);
+        return Math.round(time_hours * 60);
+    }
+
     calculateBoilerRunMinsRequired(target_temperature) {
-        var energy_kwh = this.calculateBoilerEnergyRequired(target_temperature);
+        var energy_kwh = this.calculateWarmWaterEnergyRequired(target_temperature);
         var time_hours = (energy_kwh * 1000) / this.boiler.getExpectedPower();
         return Math.round(time_hours * 60);
     }
 
-    calculateBoilerEnergyRequired(target_temperature) {
+    calculateWarmWaterEnergyRequired(target_temperature) {
         var temperature_diff = target_temperature - this.boiler.getTemperature();
         if(temperature_diff < 0) {
             temperature_diff = 0;
         }
-        var boiler_kwh_per_degree = this.boiler.getVolume() * SPECIFIC_HEAT_CAPACITY_WATER_KWH;
-        var required_energy_kwh = boiler_kwh_per_degree * temperature_diff;
-        if(this.DEBUG) { console.log("Boiler Target: " + target_temperature + "°C, Current: " + this.boiler.getTemperature() + " => Energy: " + required_energy_kwh + "kWh");}
+        var kwh_per_degree = this.boiler.getVolume() * SPECIFIC_HEAT_CAPACITY_WATER_KWH;
+        var required_energy_kwh = kwh_per_degree * temperature_diff;
+        if(this.DEBUG) { console.log("Warm Water Target: " + target_temperature + "°C, Current: " + this.boiler.getTemperature() + " => Energy: " + required_energy_kwh + "kWh");}
         return required_energy_kwh;
     }
     
- 
-    updateAtSunrise() {
-        if(this.checkStrategyExcessOnlyValid()) {
-            this.setStrategy(HEATPUMP_STRATEGY.EXCESS_ONLY);
-            this.emi_settings.set(HEATPUMP_EMI_SETTINGS.OFF);
-        } else {
-            this.emi_settings.set(HEATPUMP_EMI_SETTINGS.DEFAULT);
+    chooseStrategyIfNecessary() {
+        let now = new Date();
+        if(!this.strategy_chosen && now.getHours() >= 7) {
+            this.chooseStrategy();
         }
+    }
+    
+    chooseStrategy() {
+        console.log("Choosing Strategy for today.");
+        this.updateState();
+        if(this.checkStrategyExcessOnlyFeasible()) {
+            this.setStrategy(HEATPUMP_STRATEGY.EXCESS_ONLY);
+            this.emi_settings.apply(HEATPUMP_EMI_SETTINGS.OFF);
+        } else if(this.checkStrategyAfteroonGreedyFeasible()) {
+            this.setStrategy(HEATPUMP_STRATEGY.AFTERNOON_GREEDY);
+            this.emi_settings.apply(HEATPUMP_EMI_SETTINGS.OFF);
+        } else {
+            this.emi_settings.apply(HEATPUMP_EMI_SETTINGS.DEFAULT);
+        }
+        this.strategy_chosen = true;
+    }
+
+    updateAtSunrise() {
+        this.updateState();
+        this.chooseStrategy();
     }
 
     updateAtSunset() {
-        this.setStrategy(HEATPUMP_STRATEGY.PASSIVE);
-        this.emi_settings.set(HEATPUMP_EMI_SETTINGS.DEFAULT);
-    }
-
-    reportStatusStrategyExcess()
-    {
-        let required_boiler_runtime = this.calculateBoilerRunMinsRequired(this.boosted_warmwater_temp);
-        let required_heating_runtime = this.calculateHeatingRunMinsRequired(this.boosted_warmwater_temp);
-        console.log("Remaining required today: " + required_boiler_runtime + "min (Boiler) / " + required_heating_runtime + "min (Heating)");
+        //this.setStrategy(HEATPUMP_STRATEGY.PASSIVE);
+        //this.emi_settings.apply(HEATPUMP_EMI_SETTINGS.DEFAULT);
     }
 
     reportStatus()
     {
-        switch(this.strategy)
-        {
-            case HEATPUMP_STRATEGY.PASSIVE:
-            case HEATPUMP_STRATEGY.HEATPUMP_ECONOMIC:
-            case HEATPUMP_STRATEGY.HEATPUMP_AFTERNOON_GREEDY:
-            case HEATPUMP_STRATEGY.HYBRID:
-            case HEATPUMP_STRATEGY.HEATPUMP_GREEDY:
-                break;
-            case HEATPUMP_STRATEGY.EXCESS_ONLY:
-                this.reportStatusStrategyExcess();
-                break;
-            default:
-                console.error("Invalid strategy: " + this.strategy);            
+        let status = "STATUS (" + this.strategy + ") | ";
+        status += "DEMAND: Water = " + this.required_warmwater_runtime + "m  /" + this.required_boiler_runtime + "m";
+        if(!this.isInSummerMode()) { 
+            status += ", Heat = " + this.required_heating_runtime + "m"; 
         }
+        
+        if(this.strategy == HEATPUMP_STRATEGY.EXCESS_ONLY) {
+            status += " | EXCESS: Boiler = " + this.remaining_boiler_excess_time + "m";
+            if(!this.isInSummerMode()) {
+                status += ", Heat = " + this.remaining_heating_excess_time + "m"; 
+            }
+        } else {
+            status += " | SURPLUS: Water = " + this.remaining_warmwater_surplus_time + "m";
+            if(!this.isInSummerMode()) {
+                status += ", Heat = " + this.remaining_heating_surplus_time + "m";
+            }
+        }
+        console.log(status);
     }
+
     updateHourly() {
+        this.chooseStrategyIfNecessary();
         this.reportStatus();
         console.log("Last hour average power: " + this.pv_forecast.getLastHourAverageMeasuredPower() + "W");
     }
@@ -134,53 +186,105 @@ class HeatPumpManager{
         console.log("Set strategy to " + this.strategy + ".");
     }
 
-    checkStrategyExcessOnlyValid() {
-        let required_boiler_runtime = this.calculateBoilerRunMinsRequired(this.boosted_warmwater_temp);
-        let remaining_boiler_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.boiler.getExpectedPower());
-        if(required_boiler_runtime + this.load_grace_period_mins <= remaining_boiler_excess_time) {
-            return true;
-        } else {
-            return false;
+    checkStrategyExcessOnlyFeasible() {
+        let required_boiler_runtime = this.calculateBoilerRunMinsRequired(MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp());
+        let required_heating_runtime = this.calculateHeatingRunMinsRequired(MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp());
+
+        // Assume that the heating by heatpump (with low power) will anyway still fit after the boiler heating.
+        let remaining_boiler_time = this.pv_forecast.estimateRemainingExcessToday(this.boiler.getExpectedPower());
+        let remaining_warmwater_time = this.pv_forecast.estimateRemainingExcessToday(this.warmwater_expected_power);
+
+        let boiler_feasible = required_boiler_runtime + this.excess_load_grace_period_mins <= remaining_boiler_time;
+        let heating_feasible = required_heating_runtime + this.excess_load_grace_period_mins <= remaining_warmwater_time;
+        return boiler_feasible && heating_feasible;
+    }
+
+    checkStrategyAfteroonGreedyFeasible() {
+        let required_warmwater_runtime = this.calculateWarmWaterRunMinsRequired(DEFAULT_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp());
+        let required_heating_runtime = this.calculateHeatingRunMinsRequired(DEFAULT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp());
+        let required_runtime = required_heating_runtime + required_warmwater_runtime;
+
+        let remaining_heating_time = this.pv_forecast.estimateRemainingSurplusToday(this.heating_expected_power);
+        let remaining_warmwater_time = this.pv_forecast.estimateRemainingSurplusToday(this.warmwater_expected_power);
+        let remaining_time = Math.min(remaining_heating_time, remaining_warmwater_time);
+
+        return (required_runtime + this.surplus_load_grace_period_mins <= remaining_time);
+    }
+
+    
+
+    controlStrategyHeatPumpGreedy() {
+        if(this.required_warmwater_runtime < this.min_heatpump_runtime_mins && this.required_heating_runtime < this.min_heatpump_runtime_mins) {
+            console.log("Buffers are full, not worth to turn heatpump on anymore (Water: " + this.required_warmwater_runtime + " m needed, Heating: " + this.required_heating_runtime + "m needed.");
+            this.emi_settings.apply(HEATPUMP_EMI_SETTINGS.OFF);
+        } else if(this.emi_settings.get() == HEATPUMP_EMI_SETTINGS.OFF) {
+            console.log("Worth again to turn heatpump (Water: " + this.required_warmwater_runtime + " m needed, Heating: " + this.required_heating_runtime + "m needed.");
+            this.emi_settings.apply(HEATPUMP_EMI_SETTINGS.MAX_BUFFER);
         }
     }
 
-    conntrolStrategyHeatPumpGreedy() {
-        // Nothing to do yet
+    controlStrategyAfternoonGreedy() {
+        if(!this.checkStrategyAfteroonGreedyFeasible()) {
+            this.reportStatus();
+            this.setStrategy(HEATPUMP_STRATEGY.HEATPUMP_GREEDY);    
+            this.emi_settings.apply(HEATPUMP_EMI_SETTINGS.MAX_BUFFER);
+        }
     }
 
     controlStrategyExcessOnly() {
-        let required_boiler_runtime = this.calculateBoilerRunMinsRequired(this.boosted_warmwater_temp);
-        let remaining_boiler_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.boiler.getExpectedPower());
-        if(required_boiler_runtime + this.load_grace_period_mins > remaining_boiler_excess_time) {
-            console.log("End of excess window for boiler: " + remaining_boiler_excess_time + "m remaining, " + required_boiler_runtime + "m needed.");
+        // replace with feasible check
+        if(!this.checkStrategyExcessOnlyFeasible()) {
+            this.reportStatus();
             this.setStrategy(HEATPUMP_STRATEGY.HEATPUMP_GREEDY);    
-            this.emi_settings.set(HEATPUMP_EMI_SETTINGS.MAX_BUFFER);
-        } else {
-            if(this.DEBUG) { console.log("Boiler needs to run " + required_boiler_runtime + "m/" + remaining_boiler_excess_time + "m today."); }
-        }
-
-        let required_heating_runtime = this.calculateHeatingRunMinsRequired(this.boosted_heating_temp);
-        let remaining_heating_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.heating_expected_power);
-        if(required_heating_runtime + this.load_grace_period_mins > remaining_heating_excess_time) {
-            console.log("End of excess window for Heating: " + remaining_heating_excess_time + "m remaining, " + required_heating_runtime + "needed.");
-            this.setStrategy(HEATPUMP_STRATEGY.HEATPUMP_GREEDY);
-            this.emi_settings.set(HEATPUMP_EMI_SETTINGS.MAX_BUFFER);
-        } else {
-            if(this.DEBUG) { console.log("Heating needs to run " + required_heating_runtime + "m/" + remaining_heating_excess_time + "m today."); }
+            this.emi_settings.apply(HEATPUMP_EMI_SETTINGS.MAX_BUFFER);
         }
     }
     
+    getTargetEmiSettings(strategy) {
+        switch(strategy) {
+            case HEATPUMP_STRATEGY.PASSIVE:
+                return HEATPUMP_EMI_OFF_SETTINGS;
+            case HEATPUMP_STRATEGY.HEATPUMP_ECONOMIC:
+                return EFFICIENT_HEATPUMP_EMI_SETTINGS;
+            case HEATPUMP_STRATEGY.AFTERNOON_GREEDY:
+                return DEFAULT_HEATPUMP_EMI_SETTINGS;
+            case HEATPUMP_STRATEGY.HYBRID:
+            case HEATPUMP_STRATEGY.EXCESS_ONLY:                
+            case HEATPUMP_STRATEGY.HEATPUMP_GREEDY:
+                return MAX_BUFFER_HEATPUMP_EMI_SETTINGS;
+            default:
+                console.error("Invalid strategy: " + this.strategy);
+                return DEFAULT_HEATPUMP_EMI_SETTINGS;
+        }
+    }
+
+    updateState() {
+        let target = this.getTargetEmiSettings(this.strategy);
+        this.required_boiler_runtime = this.calculateBoilerRunMinsRequired(target.getWarmWaterTemp());   
+        this.required_warmwater_runtime = this.calculateWarmWaterRunMinsRequired(target.getWarmWaterTemp()); 
+        this.required_heating_runtime = this.calculateHeatingRunMinsRequired(target.getHeatingBufferTemp());
+
+        this.remaining_boiler_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.boiler.getExpectedPower());
+        this.remaining_heating_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.heating_expected_power); 
+
+        this.remaining_heating_surplus_time = this.pv_forecast.estimateRemainingSurplusToday(this.heating_expected_power);
+        this.remaining_warmwater_surplus_time = this.pv_forecast.estimateRemainingSurplusToday(this.warmwater_expected_power);
+    }
+
     control(interval, min_available_power, max_available_power) {
+        this.updateState();
         switch(this.strategy) {
             case HEATPUMP_STRATEGY.PASSIVE:
                 break; // Nothing to control when passive.
             case HEATPUMP_STRATEGY.HEATPUMP_ECONOMIC:
-            case HEATPUMP_STRATEGY.HEATPUMP_AFTERNOON_GREEDY:
             case HEATPUMP_STRATEGY.HYBRID:
                 if(this.DEBUG) { console.log("Unsupported strategy: " + this.strategy); }
                 break;
+            case HEATPUMP_STRATEGY.AFTERNOON_GREEDY:
+                this.controlStrategyAfternoonGreedy();
+                break;
             case HEATPUMP_STRATEGY.HEATPUMP_GREEDY:
-                this.conntrolStrategyHeatPumpGreedy();
+                this.controlStrategyHeatPumpGreedy();
                 break;
             case HEATPUMP_STRATEGY.EXCESS_ONLY:
                 this.controlStrategyExcessOnly();

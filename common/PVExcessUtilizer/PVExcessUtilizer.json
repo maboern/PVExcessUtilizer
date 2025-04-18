@@ -168,6 +168,7 @@ function resetDayValues() {
     jackery.resetDayValues();
     boiler.resetDayValues();
     heater.resetDayValues();
+    heatpump.resetDayValues();
 }
 schedule('{"time":{"exactTime":true,"start":"nadir"},"period":{"days":1}}', resetDayValues);
 

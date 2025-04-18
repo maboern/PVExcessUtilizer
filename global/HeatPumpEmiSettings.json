@@ -14,13 +14,34 @@ const HEATPUMP_EMI_SETTINGS = Object.freeze({
 
 
 class HeatPumpEmiSettings {
-    constructor() {
+    constructor(settings, root_obj) {
         this.warmwater_temp_obj = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60312';/*Obere warmwasser solltemp*/
         this.heating_buffer_temp_obj = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60310';/*Obere raum/puffertemp  hk1*/
         this.emi_on_obj = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60302';
- 
-        this.setDefaultValues();
+
+        this.root_obj = root_obj + '.emi';
+        this.EMI_SETTINGS_OBJ = this.root_obj + ".settings";
+        createState(this.EMI_SETTINGS_OBJ, HEATPUMP_EMI_SETTINGS.DEFAULT, {read: true, write: false, name: "EMI Settings", type: "string", def: "UNKNOWN"});
+
+        this.set(settings); // Set but do not apply
     }
+
+    restoreState() {
+        if(this.root_obj) {
+            this.set(getState(this.EMI_SETTINGS_OBJ).val);
+            console.info("EMI Settings restored " + this.toString());
+        } else {
+            console.warn("Could not restore HeatPump EMI from state!");
+        }
+    }
+    
+    toString() {
+        return this.settings + " (EMI=" + this.emi_on + ", water=" + this.warmwater_temp + "°C, heating=" + this.heating_buffer_temp + "°C)";
+    }
+    get() { return this.settings; }
+    getEmiOn() { return this.emi_on; }
+    getWarmWaterTemp() { return this.warmwater_temp; }
+    getHeatingBufferTemp() { return this.heating_buffer_temp; }
 
     set(settings) {
         switch(settings) {
@@ -39,44 +60,48 @@ class HeatPumpEmiSettings {
             default:
                 console.warn("Cannot set invalid settings: " + settings);
         }
-        console.log("Set to " + this.toString());
     }
 
-    toString() {
-        return this.settings + ": EMI=" + this.emi_on + ", water=" + this.warmwater_temp + "°C, heating=" + this.heating_buffer_temp + "°C.";
+    apply(settings) {
+        this.set(settings);
+        this.applyState();
     }
 
-    writeState() {
+    applyState() {
         setState(this.emi_on_obj, this.emi_on);
         setState(this.warmwater_temp_obj, this.warmwater_temp);
         setState(this.heating_buffer_temp_obj, this.heating_buffer_temp);
+        setState(this.EMI_SETTINGS_OBJ, this.settings, true);
+        console.log("Applied heatpump EMI settings " + this.toString());
     }
+
     setDefaultValues() {
         this.emi_on = 1;
         this.warmwater_temp = 53;
         this.heating_buffer_temp = 45;
         this.settings = HEATPUMP_EMI_SETTINGS.DEFAULT;
-        this.writeState();
     }
     setMaxBufferValues() {
         this.emi_on = 1;
         this.warmwater_temp = 53;
         this.heating_buffer_temp = 48;
         this.settings = HEATPUMP_EMI_SETTINGS.MAX_BUFFER;
-        this.writeState();
     }
     setEfficientValues() {
         this.emi_on = 1;
         this.warmwater_temp = 42;
         this.heating_buffer_temp = 35;
         this.settings = HEATPUMP_EMI_SETTINGS.EFFICIENT;
-        this.writeState();
     }
     setOff() {
         this.emi_on = 0;
         this.warmwater_temp = 42;
         this.heating_buffer_temp = 35;
         this.settings = HEATPUMP_EMI_SETTINGS.OFF;
-        this.writeState();
     }
 }
+
+const DEFAULT_HEATPUMP_EMI_SETTINGS = new HeatPumpEmiSettings(HEATPUMP_EMI_SETTINGS.DEFAULT);
+const HEATPUMP_EMI_OFF_SETTINGS = new HeatPumpEmiSettings(HEATPUMP_EMI_SETTINGS.OFF);
+const EFFICIENT_HEATPUMP_EMI_SETTINGS = new HeatPumpEmiSettings(HEATPUMP_EMI_SETTINGS.EFFICIENT);
+const MAX_BUFFER_HEATPUMP_EMI_SETTINGS = new HeatPumpEmiSettings(HEATPUMP_EMI_SETTINGS.MAX_BUFFER);

@@ -28,10 +28,6 @@ function smooth(smoothed_value, new_value, dynamics) {
     }
 }
 
-function addMinutes(date, minutes) {
-    return new Date(date.getTime() + minutes*60000);
-}
-
 class RingBuffer {
     constructor(length) {
         this.pointer = 0;

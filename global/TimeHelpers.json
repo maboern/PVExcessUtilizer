@@ -1,0 +1,18 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+
+function isToday(ts) {
+    var today = new Date().setHours(0, 0, 0, 0);
+    var thatDay = new Date(ts).setHours(0, 0, 0, 0);
+
+    return today === thatDay;
+}
+
+function addMinutes(date, minutes) {
+    return new Date(date.getTime() + minutes*60000);
+}
