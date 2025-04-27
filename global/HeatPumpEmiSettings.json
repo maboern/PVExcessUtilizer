@@ -19,11 +19,14 @@ class HeatPumpEmiSettings {
         this.heating_buffer_temp_obj = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60310';/*Obere raum/puffertemp  hk1*/
         this.emi_on_obj = 'stiebel-isg.0.settings.ENERGIEMANAGEMENT.val60302';
 
+        this.min_change_period_s = 5*60;
+        this.last_change_ts = 0;
+
         this.root_obj = root_obj + '.emi';
         this.EMI_SETTINGS_OBJ = this.root_obj + ".settings";
         createState(this.EMI_SETTINGS_OBJ, HEATPUMP_EMI_SETTINGS.DEFAULT, {read: true, write: false, name: "EMI Settings", type: "string", def: "UNKNOWN"});
 
-        this.set(settings); // Set but do not apply
+        this.set(settings); // Set but do not apply TODO: Load from ISG Web state.
     }
 
     restoreState() {
@@ -62,9 +65,17 @@ class HeatPumpEmiSettings {
         }
     }
 
-    apply(settings) {
-        this.set(settings);
-        this.applyState();
+    readyToChange() {
+        return (Date.now() - this.last_change_ts > this.min_change_period_s*1000);
+    }
+
+
+    apply(settings, force) {
+        let changed = (settings != this.settings);
+        if(changed || force) {
+            this.set(settings);
+            this.applyState();
+        }
     }
 
     applyState() {
@@ -72,6 +83,7 @@ class HeatPumpEmiSettings {
         setState(this.warmwater_temp_obj, this.warmwater_temp);
         setState(this.heating_buffer_temp_obj, this.heating_buffer_temp);
         setState(this.EMI_SETTINGS_OBJ, this.settings, true);
+        this.last_change_ts = Date.now();
         console.log("Applied heatpump EMI settings " + this.toString());
     }
 
@@ -90,13 +102,13 @@ class HeatPumpEmiSettings {
     setEfficientValues() {
         this.emi_on = 1;
         this.warmwater_temp = 42;
-        this.heating_buffer_temp = 35;
+        this.heating_buffer_temp = 32;
         this.settings = HEATPUMP_EMI_SETTINGS.EFFICIENT;
     }
     setOff() {
         this.emi_on = 0;
         this.warmwater_temp = 42;
-        this.heating_buffer_temp = 35;
+        this.heating_buffer_temp = 5;
         this.settings = HEATPUMP_EMI_SETTINGS.OFF;
     }
 }

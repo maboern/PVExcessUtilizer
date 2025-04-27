@@ -117,6 +117,9 @@ class PVSystem {
     getMaxExcessPower() { return this.pv_excess_power_buffer.max(); }
     getMinExcessPower() { return this.pv_excess_power_buffer.min(); }
 
+    getMaxFeedinPower() { return this.pv_feedin_power_buffer.max(); }
+    getMinFeedinPower() { return this.pv_feedin_power_buffer.min(); }
+
     checkReady() {
         if(getState(this.INV10_CONNECTED_OBJ).val 
         && getState(this.INV15_CONNECTED_OBJ).val

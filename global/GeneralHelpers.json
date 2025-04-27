@@ -12,6 +12,7 @@
  * @param {string} strStatePath   Input string of state, like 'javascript.0.switches.Osram.Bedroom'
  * @return {boolean}       true if state exists, false if not
  */
+/*
 function isState(strStatePath) {
     let mSelector = $('state[id=' + strStatePath + '$]');
     if (mSelector.length > 0) {
@@ -19,4 +20,4 @@ function isState(strStatePath) {
     } else {
         return false;
     }
-}
+}*/

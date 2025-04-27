@@ -1,0 +1,212 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+// Basic client to read and control SMA Simple Energy Management Protocol (SEMP)
+// of an Stiebel Eltron heatpump via ISG Web 
+const xml2json = require('xml2json');
+class HeatPumpSempClient {
+    constructor(root_obj) {
+        this.root_obj = root_obj + ".semp";
+        this.DEBUG = false;
+        this.url = 'http://192.168.0.186:49153/SimpleEnergyManagementProtocol/';
+        this.request_timeout = 10000;
+        this.max_request_interval_s = 60;
+        this.device_id_warmwater = '0-0000A83A-0202A0669206-00'
+        this.device_id_heating = '0-0000A83A-0202A0669206-01';
+
+        this.warmwater_controllable = false;
+        this.warmwater_on = false;
+        this.warmwater_power = 0;
+        this.last_warmwater_request_ts = 0;
+        this.last_warmwater_request_on = null;
+
+        this.heating_controllable = false;
+        this.heating_on = false;
+        this.heating_power = 0;
+        this.heating_min_power = 996;
+        this.last_heating_request_ts = 0;
+        this.last_heating_request_power = null;
+
+        this.WARMWATER_POWER_OBJ = this.root_obj + ".ww_power";
+        createState(this.WARMWATER_POWER_OBJ, 0, {read: true, write: false, name: "WarmWaterPower", type: "number", def: 0});
+        this.WARMWATER_CONTROLLABLE_OBJ = this.root_obj + ".ww_controllable";
+        createState(this.WARMWATER_CONTROLLABLE_OBJ, false, {read: true, write: false, name: "WarmWaterControllable", type: "boolean", def: false});
+
+        this.HEATING_POWER_OBJ = this.root_obj + ".heating_power";
+        createState(this.HEATING_POWER_OBJ, 0, {read: true, write: false, name: "HeatingPower", type: "number", def: 0});
+        this.HEATING_CONTROLLABLE_OBJ = this.root_obj + ".heating_controllable";
+        createState(this.HEATING_CONTROLLABLE_OBJ, false, {read: true, write: false, name: "HeatingControllable", type: "boolean", def: false});
+    }
+
+    isWarmWaterControllable() { return this.warmwater_controllable; }
+    isWarmWaterOn() { return this.warmwater_on; }
+    getWarmWaterPower() { return this.warmwater_power; }
+
+    isHeatingControllable() { return this.heating_controllable; }
+    isHeatingOn() { return this.heating_on; }
+    getHeatingPower() { return this.heating_power; }
+    getHeatingMinPower() { return this.heating_min_power; }
+
+    processStatusUpdate(data) {
+        let status_json = xml2json.toJson(data);
+        let status = JSON.parse(status_json);
+        if(this.DEBUG) { log("JSON: "+ status_json);}
+
+        this.warmwater_controllable = status.Device2EM.DeviceStatus[0].EMSignalsAccepted == "true"; 
+        this.warmwater_on = status.Device2EM.DeviceStatus[0].Status == "On"; 
+        this.warmwater_power = Number(status.Device2EM.DeviceStatus[0].PowerConsumption.PowerInfo.AveragePower);
+        this.heating_controllable = status.Device2EM.DeviceStatus[1].EMSignalsAccepted == "true";
+        this.heating_on = status.Device2EM.DeviceStatus[1].Status == "On"; 
+        this.heating_power = Number(status.Device2EM.DeviceStatus[1].PowerConsumption.PowerInfo.AveragePower);  
+    }
+
+    canReRequest(last_ts) { return (Date.now() >= last_ts + this.max_request_interval_s*1000); }
+
+    requestWarmWater(on, force) {
+        if(this.warmwater_controllable) {
+            let changed = (on != this.last_warmwater_request_on);
+            if(changed || force || this.canReRequest(this.last_warmwater_request_ts)) {
+                if(changed || force) { console.log("Requesting WarmWater: " + (on ? "ON" : "OFF"));}
+                let xml = this.createXmlRequest(this.device_id_warmwater, on, 2000);
+                if(this.DEBUG) { console.log("Request WarmWater: " + xml); }
+                this.request(xml);
+                this.last_warmwater_request_ts = Date.now();
+                this.last_warmwater_request_on = on;
+            } else {
+                if(this.DEBUG) { console.log("Warmwater request skipped because of request interval: " + this.last_warmwater_request_ts) }
+            }
+            return true;
+        } else {
+            if(this.DEBUG) { console.log("Warmwater request skipped because HeatPump not controllable.");}
+            return false;
+        }
+    }
+
+    requestHeating(power, force) {
+        if(this.heating_controllable) {
+            let changed = (Math.abs(power - this.last_heating_request_power) > 1000);
+            if(changed || force || this.canReRequest(this.last_heating_request_ts)) {
+                if(changed || force) { console.log("Requesting Heating: " + power + "W");}
+                let xml = this.createXmlRequest(this.device_id_heating, power > 0, power);
+                if(this.DEBUG) { console.log("Request Heating: " + xml); }
+                this.request(xml);
+                this.last_heating_request_ts = Date.now();
+                this.last_heating_request_power = power;
+            } else {
+                if(this.DEBUG) { console.log("Heating request skipped because of request interval: " + this.last_heating_request_ts) }
+            }
+            return true;
+        } else {
+            if(this.DEBUG) { console.log("Heating request skipped because HeatPump not controllable.");}
+            return false;
+        }
+    }
+
+    createXmlRequest(device_id, on, power) {
+        var xml = '<?xml version="1.0" encoding="UTF-8"?>';
+        xml += "<EM2Device>";
+        xml += "<DeviceControl>";
+        xml += "<DeviceId>" + device_id + "</DeviceId>";
+        xml += "<On>" + (on ? "true" : "false") + "</On>";
+        xml += "<RecommendedPowerConsumption>" + power + "</RecommendedPowerConsumption>";
+        xml += "</DeviceControl>";
+        xml += "</EM2Device>";
+        return xml;
+    }
+
+    request(data) {
+        httpPost(this.url, data, { timeout: this.request_timeout }, 
+            (error, response) => {
+                if (!error) {
+                    if(this.DEBUG) { console.log("SUCCESS for HTTP POST to" + this.url + "(" + response.statusCode + ") => [" + response.headers + "]" + response.data); }
+                } else {
+                    let msg = "(" + error + ") ERROR for HTTP POST to: " + this.url + "(" + response.statusCode + ")";
+                    log(msg, "warn");
+                }
+            }
+        );
+    }
+
+    updateState() {
+        httpGet(this.url, { timeout: this.request_timeout, responseType: 'text' },
+            (error, response) => {
+                const data = response.data;
+                const code = response.statusCode;
+                if (!error) {
+                    if(this.DEBUG) { log("Reponse (" + code + "): " + response);}
+                    this.processStatusUpdate(data)
+                } else {
+                    var msg = "(" + error + ") ERROR for HTTP GET Request to: " + this.url + "(" + code + ")";
+                    log(msg, "warn");
+                }
+            }
+        );
+    }
+
+    writeState() {
+        setState(this.WARMWATER_CONTROLLABLE_OBJ, this.warmwater_controllable, true);
+        setState(this.WARMWATER_POWER_OBJ, this.warmwater_power, true);
+        setState(this.HEATING_CONTROLLABLE_OBJ, this.heating_controllable, true);
+        setState(this.HEATING_POWER_OBJ, this.heating_power, true);
+    }
+}
+
+/*
+{
+	"Device2EM":{
+		"xmlns":"http://www.sma.de/communication/schema/SEMP/v1",
+		"DeviceInfo":[
+		{"Identification":
+			{"DeviceId":"0-0000A83A-0202A0669206-00",
+			"DeviceName":"WPM (1 IWS) (thermal storage water heater)",
+			"DeviceType":"HeatPump",
+			"DeviceSerial":"02-02-A0-66-92-06-00",
+			"DeviceVendor":"Stiebel Eltron"
+			},
+			"Characteristics":{"MaxPowerConsumption":"8698","MinOnTime":"900","MinOffTime":"960"},
+			"Capabilities":{"CurrentPower":{"Method":"Estimation"},"Timestamps":{"AbsoluteTimestamps":"false"},"Interruptions":{"InterruptionsAllowed":"true"},"Requests":{"OptionalEnergy":"true"}}
+		},
+		{"Identification":{
+				"DeviceId":"0-0000A83A-0202A0669206-01",
+				"DeviceName":"WPM (1 IWS) (heating unit)",
+				"DeviceType":"HeatPump",
+				"DeviceSerial":"02-02-A0-66-92-06-01",
+				"DeviceVendor":"Stiebel Eltron"
+				},
+				"Characteristics":{"MaxPowerConsumption":"8698","MinPowerConsumption":"996","PowerChangeRate":"30","MinOnTime":"900","MinOffTime":"960"},
+				"Capabilities":{"CurrentPower":{"Method":"Estimation"},"Timestamps":{"AbsoluteTimestamps":"false"},"Interruptions":{"InterruptionsAllowed":"true"},"Requests":{"OptionalEnergy":"true"}}
+			}
+		],
+		"DeviceStatus":[
+		{"DeviceId":"0-0000A83A-0202A0669206-00",
+			"EMSignalsAccepted":"false",
+			"Status":"Off",
+			"PowerConsumption":{"PowerInfo":{"AveragePower":"0","Timestamp":"0","AveragingInterval":"60"}}
+		},
+		{"DeviceId":"0-0000A83A-0202A0669206-01",
+		"EMSignalsAccepted":"false",
+		"Status":"Off",
+		"PowerConsumption":{"PowerInfo":{"AveragePower":"0","Timestamp":"0","AveragingInterval":"60"}}
+		}],
+		"PlanningRequest":{"Timeframe":
+		[{"DeviceId":"0-0000A83A-0202A0669206-00",
+		"EarliestStart":"39098",
+		"LatestEnd":"86400",
+		"MinRunningTime":"0",
+		"MaxRunningTime":"2400",
+		"MaxPowerConsumption":"3954",
+		"PreferenceIndifferentAreas":"Early"
+		},
+		{"DeviceId":"0-0000A83A-0202A0669206-01",
+		"EarliestStart":"0",
+		"LatestEnd":"18136",
+		"MinEnergy":"0",
+		"MaxEnergy":"1219",
+		"MaxPowerConsumption":"7249",
+		"MinPowerConsumption":"1246",
+		"PreferenceIndifferentAreas":"Late"}]}}}
+*/

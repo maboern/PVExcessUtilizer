@@ -120,7 +120,8 @@ function updateLoadControl(min_available_power, max_available_power)
     min_available_power -= expected_jackery_power;
     max_available_power -= expected_jackery_power; 
 
-    heatpump.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
+    
+    heatpump.control(SCRIPT_UPDATE_INTERVAL_SEC, pv.getMinFeedinPower(), pv.getMaxFeedinPower()); // TODO: Fix (Excess vs Surplus)
 }
 
 function controlLoads() 
@@ -150,11 +151,6 @@ function atSunrise() {
     heatpump.updateAtSunrise();
 }
 schedule('{"time":{"exactTime":true,"start":"sunrise"},"period":{"days":1}}', atSunrise);
-
-function atSunset() {
-    heatpump.updateAtSunset();
-}
-schedule('{"time":{"exactTime":true,"start":"sunset"},"period":{"days":1}}',atSunset);
 
 function hourly() {
     heatpump.updateHourly();
