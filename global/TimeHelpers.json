@@ -13,6 +13,13 @@ function isToday(ts) {
     return today === thatDay;
 }
 
+function isAfternoon() {
+    let now = new Date();
+    let afternoon = new Date().setHours(12, 0, 0, 0);
+
+    return now.getTime() >= afternoon;
+}
+
 function addMinutes(date, minutes) {
     return new Date(date.getTime() + minutes*60000);
 }

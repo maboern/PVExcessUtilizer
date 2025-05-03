@@ -90,15 +90,15 @@ function calculateDisposableLoadPower() {
     return cur_disposable_load_power;
 }
 
-function validateRunning(cur_total_load_power) {
-    var non_load_power = pv.getSelfConsumptionSmoothed() - cur_total_load_power;
-    if(non_load_power < 0) 
+function validateRunning(controlled_load_power) {
+    var unaccounted_power = pv.getSelfConsumptionSmoothed() - controlled_load_power;
+    if(unaccounted_power < 0) 
     {
-        console.log("Negative remaining non-load power: " + non_load_power + "! (Self-Consumption smoothed: " + pv.getSelfConsumptionSmoothed() + ", Loads: " + cur_total_load_power + ")");
+        console.log("Negative remaining non-load power: " + unaccounted_power + "! (Self-Consumption smoothed: " + pv.getSelfConsumptionSmoothed() + ", Loads: " + controlled_load_power + ")");
     }
-    boiler.validateRunning(non_load_power);
-    jackery.validateRunning(non_load_power);
-    heater.validateRunning(non_load_power);
+    boiler.validateRunning(unaccounted_power);
+    jackery.validateRunning(unaccounted_power);
+    heater.validateRunning(unaccounted_power);
 }
 
 function updateLoadControl(min_available_power, max_available_power)
@@ -126,7 +126,8 @@ function updateLoadControl(min_available_power, max_available_power)
 
 function controlLoads() 
 {
-    updateTotalLoadPower();
+    let controlled_load_power = updateTotalLoadPower();
+    validateRunning(controlled_load_power);
     let cur_disposable_load_power = calculateDisposableLoadPower();
 
     var min_available_power = pv.getMinExcessPower() + cur_disposable_load_power;

@@ -48,7 +48,7 @@ class PVSystem {
         this.PV_GRID_FEEDIN_TOLERANCE = 250;
         this.PV_MAX_DYNAMICS = 0.2;
         this.PV_MEASUREMENT_DYNAMICS = 0.01;
-        this.PV_MEASUREMENT_LOOKBACK_SECS = 20;
+        this.PV_MEASUREMENT_LOOKBACK_SECS = 60;
 
         this.estimation_mode = PV_POWER_ESTIMATION_MODE.MAX;
         this.mppt = new MpptCurtailmentEstimator(this.root_obj, this.INV15_VOLTAGE_B_OBJ, this.INV15_NR_PV_PANELS_B);

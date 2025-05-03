@@ -48,7 +48,7 @@ class ControllableBoiler extends ControllableLoad {
 
     allowedToRunAgainAfterSelfShutoff() {
         // Allow the water in the boiler to organize itself into layers before starting heating element again.
-        return (this.self_shutoff_at == 0 || ((Date.now() - this.self_shutoff_at) > this.min_break_after_self_shutoff_secs * 1000));
+        return (!this.hasReachedMaxTemperature() && (this.self_shutoff_at == 0 || ((Date.now() - this.self_shutoff_at) > this.min_break_after_self_shutoff_secs * 1000)));
     } 
 
     allowedToRun() {

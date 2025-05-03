@@ -185,7 +185,7 @@ class ControllableLoad {
                 this.stop(0);
                 return false;
             } else if(!this.validateDrawingPower(non_load_consumption)) {
-                console.log("Load " + this.name + " is drawing too little to be running (Non-load:" + non_load_consumption + "W / " + this.expected_power + "W).");
+                console.log("Load " + this.name + " is drawing too little to be running (Non-load: " + non_load_consumption + "W / " + this.expected_power + "W).");
                 this.self_shutoff_at = Date.now();
                 this.stop(0);
                 return false;
