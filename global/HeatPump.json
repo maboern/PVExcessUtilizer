@@ -1,0 +1,149 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+const SPECIFIC_HEAT_CAPACITY_WATER_KWH = 4.186 / 3600; // 4.186 kJ/kg·°C; 3600 kJ/kWh
+
+class HeatPump {
+      constructor(root_obj, pv_forecast, boiler) {
+        this.root_obj = root_obj + ".heatpump";
+        this.semp_client = new HeatPumpSempClient(this.root_obj);
+        this.boiler = boiler;
+        this.DEBUG = false;
+
+        this.heating_buffer_temp_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.PUFFERISTTEMPERATUR';
+        this.summer_mode_obj = 'stiebel-isg.0.info.STATUSANLAGE.BETRIEBSSTATUS.SOMMERBETRIEB';
+        this.hk2_pump_obj = 'stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.HEIZKREISPUMPE_2';
+        this.hk3_pump_obj = 'stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.HEIZKREISPUMPE_3';
+
+        this.required_boiler_runtime = 0;
+        this.required_warmwater_runtime = 0;
+        this.required_heating_runtime = 0;
+
+        this.min_heatpump_runtime_mins = 15; // Do not start the heatpump if it is expected to run less than that time.
+        this.heating_buffer_volume = 400; // 400 l
+        // TODO: Make temperature-dependent.
+        this.heating_expected_power = 1500; // The SHM pretty much goes to max power as long as there is surplus. TODO: Correct once we control it ourselves.
+        this.warmwater_expected_power = 2500;
+        this.heatpump_efficiency_factor = 4 // How much heat energy the heat pump gets out for putting electric energy in
+
+        this.HK2_PUMP_OBJ = this.root_obj + ".hk2_pump";
+        createState(this.HK2_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK2", type: "boolean", def: false});
+        this.HK3_PUMP_OBJ = this.root_obj + ".hk3_pump";
+        createState(this.HK3_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK3", type: "boolean", def: false});
+
+        this.updateState();
+      }  
+ 
+    calculateHeatingRunMinsRequired(target_temperature) {
+        var energy_kwh = this.calculateHeatingEnergyRequired(target_temperature);
+        var time_hours = (energy_kwh * 1000) / (this.heating_expected_power * this.heatpump_efficiency_factor);
+        return Math.round(time_hours * 60);
+    }
+    
+    getIsgBooleanState(boolean_state) {
+        if(existsState(boolean_state)) {
+            let state = getState(boolean_state);
+            if(state && state.val == true) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    isInSummerMode() {
+        return this.getIsgBooleanState(this.summer_mode_obj);
+    }
+
+    calculateHeatingEnergyRequired(target_temperature) {
+        if(this.isInSummerMode()) {
+            return 0;
+        }
+        
+        let buffer_temperature = getState(this.heating_buffer_temp_obj).val;
+        var temperature_diff = target_temperature - buffer_temperature;
+        if(temperature_diff < 0) {
+            temperature_diff = 0;
+        }
+        var boiler_kwh_per_degree = this.heating_buffer_volume * SPECIFIC_HEAT_CAPACITY_WATER_KWH;
+        var required_energy_kwh = boiler_kwh_per_degree * temperature_diff;
+        if(this.DEBUG) { console.log("Heating Buffer Target: " + target_temperature + "°C, Current: " + buffer_temperature + " => Energy: " + required_energy_kwh + "kWh");}
+        return required_energy_kwh;
+    }
+
+    calculateWarmWaterRunMinsRequired(target_temperature) {
+        var energy_kwh = this.calculateWarmWaterEnergyRequired(target_temperature);
+        var time_hours = (energy_kwh * 1000) / (this.warmwater_expected_power * this.heatpump_efficiency_factor);
+        return Math.round(time_hours * 60);
+    }
+
+    calculateBoilerRunMinsRequired(target_temperature) {
+        var energy_kwh = this.calculateWarmWaterEnergyRequired(target_temperature);
+        var time_hours = (energy_kwh * 1000) / this.boiler.getExpectedPower();
+        return Math.round(time_hours * 60);
+    }
+
+    calculateWarmWaterEnergyRequired(target_temperature) {
+        var temperature_diff = target_temperature - this.boiler.getTemperature();
+        if(temperature_diff < 0) {
+            temperature_diff = 0;
+        }
+        var kwh_per_degree = this.boiler.getVolume() * SPECIFIC_HEAT_CAPACITY_WATER_KWH;
+        var required_energy_kwh = kwh_per_degree * temperature_diff;
+        if(this.DEBUG) { console.log("Warm Water Target: " + target_temperature + "°C, Current: " + this.boiler.getTemperature() + " => Energy: " + required_energy_kwh + "kWh");}
+        return required_energy_kwh;
+    }
+
+    isWarmWaterAllowedToStart() {  return (this.required_warmwater_runtime >= this.min_heatpump_runtime_mins); }
+    isHeatingAllowedToStart() { return (this.required_heating_runtime >= this.min_heatpump_runtime_mins);  }
+    isAllowedToStart() { return (this.isWarmWaterAllowedToStart() || this.isHeatingAllowedToStart());  }
+    getRequiredWarmWaterRunTime() { return this.required_warmwater_runtime; }
+    getRequiredBoilerRunTime() { return this.required_boiler_runtime; }
+    getRequiredHeatingRunTime() { return this.required_heating_runtime; }
+    getExpectedWarmWaterPower() { return this.warmwater_expected_power; }
+    getExpectedHeatingPower() { return this.heating_expected_power; }
+    getExpectedBoilerPower() { return this.boiler.getExpectedPower(); }
+
+    forceBuffering(available_power) {
+        if(this.isHeatingAllowedToStart() && available_power > this.semp_client.getHeatingMinPower) {
+            this.semp_client.requestHeating(available_power, false);
+        }
+        if(this.isWarmWaterAllowedToStart() && available_power > this.warmwater_expected_power) {
+            this.semp_client.requestWarmWater(true, false);
+        }
+    }
+
+    controlEfficient(min_available_power, max_available_power) {
+        let min_power = this.semp_client.getHeatingMinPower();
+        if((this.isHeatingAllowedToStart() || this.semp_client.isHeatingOn()) && min_available_power > min_power) { 
+            this.semp_client.requestHeating(min_power, false); // TODO: Power Demand following, increase power when colder
+        } else if(max_available_power < min_power) {
+            this.semp_client.requestHeating(0, false);
+        }
+
+        if((this.isWarmWaterAllowedToStart() || this.semp_client.isWarmWaterOn()) && min_available_power > this.warmwater_expected_power) {
+            this.semp_client.requestWarmWater(true, false);
+        }
+    }
+
+
+    updateState() {
+        this.semp_client.updateState();
+        
+        let target = MAX_BUFFER_HEATPUMP_EMI_SETTINGS;
+        this.required_boiler_runtime = this.calculateBoilerRunMinsRequired(target.getWarmWaterTemp());   
+        this.required_warmwater_runtime = this.calculateWarmWaterRunMinsRequired(target.getWarmWaterTemp()); 
+        this.required_heating_runtime = this.calculateHeatingRunMinsRequired(target.getHeatingBufferTemp());
+
+        this.hk2_pump_on = this.getIsgBooleanState(this.hk2_pump_obj);
+        setState(this.HK2_PUMP_OBJ, this.hk2_pump_on, true);
+        this.hk3_pump_on = this.getIsgBooleanState(this.hk3_pump_obj);
+        setState(this.HK3_PUMP_OBJ, this.hk3_pump_on, true);
+
+        this.semp_client.writeState();
+
+    }
+}
