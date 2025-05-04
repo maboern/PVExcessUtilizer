@@ -5,6 +5,26 @@
   "verbose": false
 }
 -- do not edit previous lines - END --*/
+/*
+Strategy: Excess
+Mode: Efficient, Buffering (once boiler not feasible anymore)
+EMI Setting: MaxBuffer
+
+Strategy: Surplus
+Mode: Efficient, Buffering (once required = remaining + 1h OR if excess)
+EMI Setting: MaxBuffer
+
+Strategy: Greedy
+Mode: Modulated, Buffering (if high surplus)
+EMI Setting: MaxBuffer
+
+*/
+const HEATPUMP_MODE = Object.freeze({
+    EFFICIENT : "EFFICIENT",  // Lowest power possible for heatpump to be most efficient.
+    MODULATED : "MODULATED", // Modulate heatpump power to follow available solar surplus
+    BUFFERING : "BUFFERING", // Try to fill buffers as fast as possible with available surplus energy.
+    EFFICIENT_BUFFERING : "EFFICIENT_BUFFERING", // Same as Buffering, but keep heatpump lower in an efficient regime
+});
 const SPECIFIC_HEAT_CAPACITY_WATER_KWH = 4.186 / 3600; // 4.186 kJ/kg·°C; 3600 kJ/kWh
 
 class HeatPump {
@@ -13,6 +33,8 @@ class HeatPump {
         this.semp_client = new HeatPumpSempClient(this.root_obj);
         this.boiler = boiler;
         this.DEBUG = false;
+
+        this.mode = HEATPUMP_MODE.EFFICIENT;
 
         this.heating_buffer_temp_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.PUFFERISTTEMPERATUR';
         this.summer_mode_obj = 'stiebel-isg.0.info.STATUSANLAGE.BETRIEBSSTATUS.SOMMERBETRIEB';
@@ -36,8 +58,14 @@ class HeatPump {
         createState(this.HK3_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK3", type: "boolean", def: false});
 
         this.updateState();
-      }  
+    }  
  
+    changeMode(new_mode) {
+        if(new_mode != this.mode) {
+            this.mode = new_mode;
+            console.log("Changing Heatpump mode to " + new_mode + ".");
+        }
+    }
     calculateHeatingRunMinsRequired(target_temperature) {
         var energy_kwh = this.calculateHeatingEnergyRequired(target_temperature);
         var time_hours = (energy_kwh * 1000) / (this.heating_expected_power * this.heatpump_efficiency_factor);
@@ -107,7 +135,7 @@ class HeatPump {
     getExpectedHeatingPower() { return this.heating_expected_power; }
     getExpectedBoilerPower() { return this.boiler.getExpectedPower(); }
 
-    forceBuffering(available_power) {
+    controlBuffering(available_power) {
         if(this.isHeatingAllowedToStart() && available_power > this.semp_client.getHeatingMinPower) {
             this.semp_client.requestHeating(available_power, false);
         }
@@ -129,7 +157,22 @@ class HeatPump {
         }
     }
 
+    control(available_power, min_available_power, max_available_power) {
+        switch(this.mode) {
+            case HEATPUMP_MODE.EFFICIENT:
+            case HEATPUMP_MODE.MODULATED: // TODO
+                this.controlEfficient(min_available_power, max_available_power);
+                break;
+            case HEATPUMP_MODE.BUFFERING:
+            case HEATPUMP_MODE.EFFICIENT_BUFFERING:
+                this.controlBuffering(available_power);
+                break;
+            default:
+                console.error("Unsupported HEATPUMP MODE: " + this.mode);
+                break;
 
+        }
+    }
     updateState() {
         this.semp_client.updateState();
         

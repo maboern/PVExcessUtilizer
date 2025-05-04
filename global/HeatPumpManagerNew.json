@@ -76,9 +76,9 @@ class HeatPumpManager{
     
     chooseStrategy() {
         this.updateState();
-        if(this.checkStrategyExcessFeasible()) {
+        if(this.checkExcessOnlyFeasible()) {
             this.setStrategy(HEATPUMP_STRATEGY.EXCESS);
-        } else if(this.checkStrategySurplusFeasible()) {
+        } else if(this.checkSurplusOnlyFeasible()) {
             this.setStrategy(HEATPUMP_STRATEGY.SURPLUS);
         } else {
             this.setStrategy(HEATPUMP_STRATEGY.GREEDY);
@@ -127,44 +127,37 @@ class HeatPumpManager{
         }
     }
 
-    checkStrategyExcessFeasible() {
+    checkExcessOnlyFeasible() {
         // Assume that the heating by heatpump (with low power) will anyway still fit after the boiler heating.
         let boiler_feasible = this.heatpump.getRequiredBoilerRunTime() + this.excess_load_grace_period_mins <= this.remaining_boiler_excess_time;
         let heating_feasible = this.heatpump.getRequiredHeatingRunTime() + this.excess_load_grace_period_mins <= this.remaining_heating_excess_time;
         return boiler_feasible && heating_feasible;
     }
 
-    checkStrategySurplusFeasible() {
+    checkSurplusBufferNow() {   return !this.checkExcessOnlyFeasible();  }
+    checkSurplusOnlyFeasible() {
         let required_runtime = this.heatpump.getRequiredHeatingRunTime() + this.heatpump.getRequiredWarmWaterRunTime();
         let remaining_time = Math.min(this.remaining_heating_surplus_time, this.remaining_warmwater_surplus_time);
         return (required_runtime + this.surplus_load_grace_period_mins <= remaining_time);
     }
 
     controlStrategyGreedy(min_available_power, max_available_power) {
-        if(this.heatpump.isAllowedToStart()) {  
-            console.log("Worth again to turn on heatpump (Water: " + this.heatpump.getRequiredWarmWaterRunTime + " m needed, Heating: " + this.heatpump.getRequiredHeatingRunTime + "m needed.");
-            this.heatpump.forceBuffering(min_available_power);     
-        } else {
-            console.log("Buffers are full, not worth to turn heatpump on anymore (Water: " + this.heatpump.getRequiredWarmWaterRunTime + " m needed, Heating: " + this.heatpump.getRequiredHeatingRunTime() + "m needed.");
-        }
+        this.heatpump.setMode(HEATPUMP_MODE.MODULATED);
     }
 
-    controlStrategySurplus(min_available_power, max_available_power) {
-        if(this.checkStrategySurplusFeasible()) {
-            this.heatpump.controlEfficient(min_available_power, max_available_power);
-        } else if(isAfternoon()) {
-            console.log("Strategy " + this.strategy + " may not feasible anymore... ");
-            this.reportStatus();
-            this.chooseStrategy();
+    controlStrategySurplus() {    
+        if(isAfternoon() && this.checkSurplusBufferNow()) {
+            this.heatpump.setMode(HEATPUMP_MODE.BUFFERING);
+        } else {
+            this.heatpump.setMode(HEATPUMP_MODE.EFFICIENT);
         }
-
     }
 
     controlStrategyExcess() {
-        if(isAfternoon() && !this.checkStrategyExcessFeasible()) {
-            console.log("Strategy " + this.strategy + " may not feasible anymore... ");
-            this.reportStatus();
-            this.chooseStrategy();
+        if(this.checkExcessOnlyFeasible()) {
+            this.heatpump.setMode(HEATPUMP_MODE.EFFICIENT);
+        } else if(isAfternoon()) {
+            this.heatpump.setMode(HEATPUMP_MODE.BUFFERING);
         }
     }
 
@@ -186,7 +179,7 @@ class HeatPumpManager{
                 this.controlStrategySurplus();
                 break;
             case HEATPUMP_STRATEGY.GREEDY:
-                this.controlStrategyGreedy(min_available_power, max_available_power);
+                this.controlStrategyGreedy();
                 break;
             case HEATPUMP_STRATEGY.EXCESS:
                 this.controlStrategyExcess();
@@ -194,5 +187,6 @@ class HeatPumpManager{
             default:
                 console.error("Invalid strategy: " + this.strategy);
         }
+        this.heatpump.control(min_available_power, min_available_power, max_available_power);
     }
 }

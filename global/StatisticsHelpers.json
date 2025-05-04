@@ -40,6 +40,14 @@ class RingBuffer {
         this.pointer = (this.length + this.pointer + 1) % this.length;
     }
 
+    linearize() {
+        return this.buffer.slice(this.pointer).concat(this.buffer.slice(0, this.pointer));
+    }
+    smooth(dynamics) {
+        const linearized = this.linearize();
+        return linearized.reduce((a,b) => a + (b - a)*dynamics);
+    }
+
     max() {
         return Math.max.apply(Math, this.buffer);
     }
@@ -52,7 +60,35 @@ class RingBuffer {
         return this.buffer.reduce((p,c,_,a) => p + c/a.length, 0);
     }
 
+    sum() {
+        return this.buffer.reduce((a, b) => a + b, 0);
+    }
+
     spread() {
         return this.max() - this.min();
+    }
+
+    sorted() {
+        return this.buffer.concat().sort((a, b) => a - b);
+    }
+
+    percentile(p) { return this.quantile(p/100); }
+    quantile(q) {
+        const sorted = this.sorted();
+        const pos = (sorted.length - 1)*q;
+        const base = Math.floor(pos);
+        const rest = pos - base;
+        if (sorted[base + 1] !== undefined) {
+            return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+        } else {
+            return sorted[base];
+        }
+    }
+
+    std() {
+        const mu = this.avg();
+        const diffArr = this.buffer.map(a => (a - mu) ** 2);
+        const diffSum = diffArr.reduce((a, b) => a + b, 0);
+        return Math.sqrt(diffSum / (this.length - 1));
     }
 }

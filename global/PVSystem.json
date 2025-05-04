@@ -113,12 +113,16 @@ class PVSystem {
     getUpdateIntervalMs() { return this.updateIntervalMs; }
     getSelfConsumption() { return this.self_consumption; }
     getSelfConsumptionSmoothed() { return this.self_consumption_smoothed; }
+    getRecentSelfConsumptionStats() { return this.self_consumption_buffer; }
+    
     getExcessPower() { return this.pv_excess_power; }
     getMaxExcessPower() { return this.pv_excess_power_buffer.max(); }
     getMinExcessPower() { return this.pv_excess_power_buffer.min(); }
+    getRecentExcessPowerStats() { return this.pv_excess_power_buffer; }
 
     getMaxFeedinPower() { return this.pv_feedin_power_buffer.max(); }
     getMinFeedinPower() { return this.pv_feedin_power_buffer.min(); }
+    getRecentFeedinPowerStats() { return this.pv_feedin_power_buffer; }
 
     checkReady() {
         if(getState(this.INV10_CONNECTED_OBJ).val 

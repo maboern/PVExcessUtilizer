@@ -54,7 +54,6 @@ class HeatPumpSempClient {
     processStatusUpdate(data) {
         let status_json = xml2json.toJson(data);
         let status = JSON.parse(status_json);
-        if(this.DEBUG) { log("JSON: "+ status_json);}
 
         this.warmwater_controllable = status.Device2EM.DeviceStatus[0].EMSignalsAccepted == "true"; 
         this.warmwater_on = status.Device2EM.DeviceStatus[0].Status == "On"; 

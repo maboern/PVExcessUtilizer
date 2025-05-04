@@ -129,10 +129,13 @@ function controlLoads()
     let controlled_load_power = updateTotalLoadPower();
     validateRunning(controlled_load_power);
     let cur_disposable_load_power = calculateDisposableLoadPower();
+    let excess_power = pv.getRecentExcessPowerStats();
 
-    var min_available_power = pv.getMinExcessPower() + cur_disposable_load_power;
+    var min_available_power = excess_power.percentile(10) + cur_disposable_load_power;
+    //var min_available_power = pv.getMinExcessPower() + cur_disposable_load_power;
     setState(SCRIPT_AVAILABLE_MIN_WATTS_OBJ, min_available_power, true);
-    var max_available_power = pv.getMaxExcessPower() + cur_disposable_load_power;
+    var max_available_power = excess_power.percentile(80) + cur_disposable_load_power;
+    //var max_available_power = pv.getMaxExcessPower() + cur_disposable_load_power;
     setState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, max_available_power, true);
     
     if(SCRIPT_DEBUG) {
