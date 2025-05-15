@@ -43,6 +43,12 @@ class RingBuffer {
     linearize() {
         return this.buffer.slice(this.pointer).concat(this.buffer.slice(0, this.pointer));
     }
+
+    last() {
+        if(this.pointer - 1 >= 0) { return this.buffer[this.pointer - 1]; }
+        return this.buffer[this.length - 1];
+    }
+    
     smooth(dynamics) {
         const linearized = this.linearize();
         return linearized.reduce((a,b) => a + (b - a)*dynamics);

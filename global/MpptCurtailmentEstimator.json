@@ -109,7 +109,7 @@ class MpptCurtailmentEstimator {
         }
     }
 
-    uncurtailedVoltageIsStale() {
+    calculateVoltageStalenessTimeout() {
         const CURTAILMENT_VOLTAGE_ESTIMATE_STALENESS_TIMOUT_MS = 2*60*60*1000;
         const NORM_POWER_LEVEL_CHANGE = 5000;
         
@@ -121,12 +121,21 @@ class MpptCurtailmentEstimator {
         // postulating that the panels will heat up very fast in the sun. Therefore, the higher
         // the change in power since the last uncurtailed measurements, the faster our uncurtailed
         // voltage estimation becomes stale.
-        var power_level_change = Math.abs(this.smoothed_power - this.last_uncurtailed_power);
-        var power_level_change_factor = 1 + (power_level_change / NORM_POWER_LEVEL_CHANGE); 
+        let power_level_change = Math.abs(this.smoothed_power - this.last_uncurtailed_power);
+        let power_level_change_factor = 1 + (power_level_change / NORM_POWER_LEVEL_CHANGE); 
+        let staleness_timeout = CURTAILMENT_VOLTAGE_ESTIMATE_STALENESS_TIMOUT_MS / power_level_change_factor;
+        return staleness_timeout;
+    }
 
-        var staleness_timeout = CURTAILMENT_VOLTAGE_ESTIMATE_STALENESS_TIMOUT_MS / power_level_change_factor;
-
-        return ((Date.now() - this.last_uncurtailed_ts) > staleness_timeout);
+    getUncurtailedVoltageStaleness() {
+        // Returns a number between 0 and 1 indicating the staleness of the MPPT Tracking estimate.
+        let staleness_timeout = this.calculateVoltageStalenessTimeout();
+        let staleness = (Date.now() - this.last_uncurtailed_ts) / staleness_timeout;
+        return Math.max(staleness, 1);
+    }
+    
+    uncurtailedVoltageIsStale() {
+        return this.getUncurtailedVoltageStaleness() >= 1;
     }
 
     isReliable() {
@@ -157,10 +166,6 @@ class MpptCurtailmentEstimator {
                 this.last_uncurtailed_temperature = this.temp_tracker.getPanelTemperature();
             }
         }
-        // TODO: Predict the voltage drop due to heating in "clouds with gaps" situations
-        // On 2025-03-23 (Temp: ~14°, clouded power ~6kW, gap power: ~20kW) observed:
-        // -1.6V/15 Minutes => -0.00178V/s
-        // -0.69V/5.5Minutes => -0.002V/s
         
         this.updateCurtailmentEstimate();
         this.power = pv_power / (1 - this.curtailment);

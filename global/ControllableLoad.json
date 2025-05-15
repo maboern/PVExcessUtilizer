@@ -22,6 +22,7 @@ class ControllableLoad {
         this.startup_time_ms = 10 * 1000;
         this.min_runtime_secs = 0;
 
+        this.is_ready = true;
         this.runtime_secs = 0;
         this.last_started_at = 0;
         this.max_day_runtime_secs = 12*60*60;
@@ -42,22 +43,29 @@ class ControllableLoad {
         this.day_energy_obj = this.root_obj + '.dayEnergy';
         createState(this.day_energy_obj, 0, {read: true, write: false, name: "Load Day Energy", type: "number", unit: "Wh", def: 0});
 
+        this.max_day_runtime_mins_obj = this.root_obj + '.maxDayRuntimeMins';
+        createState(this.max_day_runtime_mins_obj, 12*60, {read: true, write: true, name: "Max Daily Runtime", type: "number", unit: "min", def: 12*60});
+
         this.restoreState();
     }
 
     restoreState() {
         this.runtime_secs = getState(this.runtime_secs_obj).val;
         this.day_energy = getState(this.day_energy_obj).val;
+        this.max_day_runtime_secs = getState(this.max_day_runtime_mins_obj).val*60;
     }
 
-    isOn() { return getState(this.switch_obj).val; }
+    isOn() { return this.isReady() && getState(this.switch_obj).val; }
     toString() { return `Load ${this.name} (${this.load_type})`; }
     isReady() { 
-        if(this.is_connected_obj) {
-            return getState(this.is_connected_obj).val;
-        } else {
-            return false;
+        let was_ready = this.is_ready;
+        this.is_ready = getStateIfExisting(this.is_connected_obj, false); 
+        if(was_ready && !this.is_ready) { 
+            console.log(this.toString() + " became NOT READY!"); 
+        } else if(this.is_ready && !was_ready) { 
+            console.log(this.toString() + " became READY.");
         }
+        return this.is_ready;
     }
 
     updateEnergyConsumption(interval) {
@@ -124,7 +132,7 @@ class ControllableLoad {
     }
 
     getMeasuredPower() {
-        return getState(this.measured_power_obj).val;
+        return getStateIfExistingWithMaxAge(this.measured_power_obj, 60, 0);
     }
 
     getCurrentPower() {
@@ -197,10 +205,20 @@ class ControllableLoad {
         }
     }
 
+    checkMaxRuntimeUpdated() {
+        let old_runtime = this.max_day_runtime_secs;
+        this.max_day_runtime_secs = getState(this.max_day_runtime_mins_obj).val*60;
+        if(this.max_day_runtime_secs != old_runtime) {
+            console.log("Load " + this.name + ": Updated max daily runtime to " + this.max_day_runtime_secs/60 + "mins.");
+        }
+        setState(this.max_day_runtime_mins_obj, this.max_day_runtime_secs/60, true);
+    }
+
     control(interval, min_available_power, max_available_power) {
         if(!this.isReady()) {
             return false;
         }
+        this.checkMaxRuntimeUpdated();
 
         if(this.isOn()) {
             if(this.hasRunForMinimumTime()) {

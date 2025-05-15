@@ -36,11 +36,9 @@ class ControllableBoiler extends ControllableLoad {
     }
 
     updateTemperature() {
-        var temp_obj = getState(this.boiler_temperature_sensor_obj);
-        if(temp_obj && temp_obj.ts > Date.now() - 3*60*60*1000) {
-            this.boiler_temperature = temp_obj.val;
-        }
+        this.boiler_temperature = getStateIfExistingWithMaxAge(this.boiler_temperature_sensor_obj, 3*60*60, this.boiler_temperature);
     }
+    
     hasReachedMaxTemperature() {
         this.updateTemperature();
         return this.getTemperature() >= this.boiler_max_temperature;

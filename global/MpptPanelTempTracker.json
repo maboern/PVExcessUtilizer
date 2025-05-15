@@ -32,10 +32,12 @@ class MpptPanelTempTracker {
     }
     restoreState() {
         this.updateAmbientTemperature();
-        var panel_temp_state = getState(this.TEMPERATURE_ESTIMATE_OBJ);
-        if(panel_temp_state.ts > Date.now() - 10*60*1000) {
-            this.panel_temperature = panel_temp_state.val;
+        var panel_temp = getStateIfExistingWithMaxAge(this.TEMPERATURE_ESTIMATE_OBJ, 10*60, -9999);
+        if(panel_temp != -9999) {
+            this.panel_temperature = panel_temp;
             console.log("Updating panel temperature from state: " + this.panel_temperature + "°C @ ambient: " + this.ambient_temperature + "°C.");
+        } else {
+            console.warn("Coud not restore panel temperature from state!");
         }
     }
 
@@ -62,6 +64,10 @@ class MpptPanelTempTracker {
     }
     
     correctVoltage(reference_voltage, reference_temperature) {
+        // Predict the voltage drop due to heating in "clouds with gaps" situations
+        // On 2025-03-23 (Temp: ~14°, clouded power ~6kW, gap power: ~20kW) observed:
+        // -1.6V/15 Minutes => -0.00178V/s
+        // -0.69V/5.5Minutes => -0.002V/s
         var temp_diff = this.panel_temperature - reference_temperature;
         var temperature_correction_percent = temp_diff * this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT;
         var temperature_corrected_voltage = reference_voltage * (1 + temperature_correction_percent);
@@ -69,10 +75,7 @@ class MpptPanelTempTracker {
     }
 
     updateAmbientTemperature() {
-        var temp_obj = getState(this.ambient_temperature_sensor_obj);
-        if(temp_obj && temp_obj.ts > Date.now() - 3*60*60*1000) {
-            this.ambient_temperature = temp_obj.val;
-        }
+        return getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 3*60*60, this.ambient_temperature);
     }
 
     writeState() {

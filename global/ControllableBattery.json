@@ -6,7 +6,7 @@
 }
 -- do not edit previous lines - END --*/
 class ControllableBattery extends ControllableLoad {
-    constructor(script_id, name, capacity_wh) {
+    constructor(script_id, name, capacity_wh, charging_power, shelly_id) {
         super(script_id, name, CONTROLLABLE_LOAD_TYPE.BATTERY);
 
         this.capacity_wh = capacity_wh;
@@ -16,15 +16,15 @@ class ControllableBattery extends ControllableLoad {
         this.startup_time_ms = 60 * 1000;
         this.min_runtime_secs = 5 * 60;
 
-        this.expected_power = 1500;
+        this.expected_power = charging_power;
         this.load_hysteresis_power = 500;
-        this.is_connected_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.online';
-        this.switch_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.Relay0.Switch';
-        this.measured_power_obj = 'shelly.0.shellyplusplugs#e465b8455ce8#1.Relay0.Power';
+        this.is_connected_obj = 'shelly.0.shellyplusplugs#' + shelly_id + '.online';
+        this.switch_obj = 'shelly.0.shellyplusplugs#' + shelly_id + '.Relay0.Switch';
+        this.measured_power_obj = 'shelly.0.shellyplusplugs#' + shelly_id + '.Relay0.Power';
 
         this.level_of_charge_percent_obj = this.root_obj + '.loc_percent';
         createState(this.level_of_charge_percent_obj, 0, {read: true, write: true, name: "Level of Charge Percent", type: "number", unit: "%", def: 100});
-        this.level_of_charge_percent = getState(this.level_of_charge_percent_obj).val
+        this.level_of_charge_percent = getState(this.level_of_charge_percent_obj).val;
 
         console.log("Initialized " + this.toString());
     }
