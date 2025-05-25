@@ -131,7 +131,7 @@ class MpptCurtailmentEstimator {
         // Returns a number between 0 and 1 indicating the staleness of the MPPT Tracking estimate.
         let staleness_timeout = this.calculateVoltageStalenessTimeout();
         let staleness = (Date.now() - this.last_uncurtailed_ts) / staleness_timeout;
-        return Math.max(staleness, 1);
+        return Math.min(staleness, 1);
     }
     
     uncurtailedVoltageIsStale() {

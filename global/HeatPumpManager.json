@@ -97,9 +97,9 @@ class HeatPumpManager {
     reportStatus()
     {
         let status = "STATUS (" + this.strategy + ") | ";
-        status += "DEMAND: Water = " + this.heatpump.getRequiredWarmWaterRunTime() + "m/" + this.heatpump.getRequiredBoilerRunTime() + "m";
+        status += "DEMAND: Water = " + this.heatpump.getRequiredWarmWaterRunTimeToMaxBuffer() + "m/" + this.heatpump.getRequiredBoilerRunTimeToMaxBuffer() + "m";
         if(!this.heatpump.isInSummerMode()) { 
-            status += ", Heat = " + this.heatpump.getRequiredHeatingRunTime() + "m"; 
+            status += ", Heat = " + this.heatpump.getRequiredHeatingRunTimeToMaxBuffer() + "m"; 
         }
         
         if(this.strategy == HEATPUMP_STRATEGY.EXCESS) {
@@ -123,7 +123,7 @@ class HeatPumpManager {
     }
 
     setStrategy(new_strategy) {
-        if(this.strategy != new_strategy) {
+        if(this.strategy != new_strategy || !this.strategy_chosen) {
             this.strategy = new_strategy;
             setState(this.STRATEGY_OBJ, this.strategy, true);
             console.log("Set strategy to " + this.strategy + ".");
@@ -132,48 +132,47 @@ class HeatPumpManager {
 
     checkExcessBoilerOnlyFeasible() {
         // Assume that the heating by heatpump (with low power) will anyway still fit after the boiler heating.
-        let boiler_feasible = this.heatpump.getRequiredBoilerRunTime() + this.excess_load_grace_period_mins <= this.remaining_boiler_excess_time;
-        let heating_feasible = this.heatpump.getRequiredHeatingRunTime() + this.excess_load_grace_period_mins <= this.remaining_heating_excess_time;
+        let boiler_feasible = this.heatpump.getRequiredBoilerRunTimeToMaxBuffer() + this.excess_load_grace_period_mins <= this.remaining_boiler_excess_time;
+        let heating_feasible = this.heatpump.getRequiredHeatingRunTimeToMaxBuffer() + this.excess_load_grace_period_mins <= this.remaining_heating_excess_time;
         return boiler_feasible && heating_feasible;
     }
 
+    doStartExcessHeatPumpBufferingNow() { return !this.checkExcessHeatPumpFeasible(); }
     checkExcessHeatPumpFeasible() {
         // Assume that the heating by heatpump (with low power) will anyway still fit after the boiler heating.
-        let warmwater_feasible = this.heatpump.getRequiredWarmWaterRunTime() + this.excess_load_grace_period_mins <= this.remaining_warmwater_excess_time;
-        let heating_feasible = this.heatpump.getRequiredHeatingRunTime() + this.excess_load_grace_period_mins <= this.remaining_heating_excess_time;
+        let warmwater_feasible = this.heatpump.getRequiredWarmWaterRunTimeToMaxBuffer() + this.excess_load_grace_period_mins <= this.remaining_warmwater_excess_time;
+        let heating_feasible = this.heatpump.getRequiredHeatingRunTimeToMaxBuffer() + this.excess_load_grace_period_mins <= this.remaining_heating_excess_time;
         return warmwater_feasible && heating_feasible;
     }
 
     doStartSurplusBufferingNow() {   return !this.checkSurplusOnlyFeasible();  }
     checkSurplusOnlyFeasible() {
-        let required_runtime = this.heatpump.getRequiredHeatingRunTime() + this.heatpump.getRequiredWarmWaterRunTime();
+        let required_runtime = this.heatpump.getRequiredHeatingRunTimeToMaxBuffer() + this.heatpump.getRequiredWarmWaterRunTimeToMaxBuffer();
         let remaining_time = Math.min(this.remaining_heating_surplus_time, this.remaining_warmwater_surplus_time);
         return (required_runtime + this.surplus_load_grace_period_mins <= remaining_time);
     }
 
     controlStrategyGreedy(surplus) {
-        let min_surplus_power = surplus.percentile(20);
-        let max_surplus_power = surplus.percentile(80);
+        let min_surplus_power = surplus.tail(60).percentile(20); 
+        let max_surplus_power = Math.max(surplus.percentile(75), min_surplus_power);
         this.heatpump.setMode(HEATPUMP_MODE.MODULATED);
         this.heatpump.control(min_surplus_power, max_surplus_power);
     }
 
-    doStartOpportunisticExcessBuffering(min_excess_power) {
-        return min_excess_power > this.heatpump.getExpectedWarmWaterPower();
-    }
-    canContinueOpportunisticExcessBuffering(max_excess_power) {
-        let is_excess_buffering = this.heatpump.getMode() == HEATPUMP_MODE.BUFFERING;
-        let can_continue = max_excess_power > this.heatpump.getExpectedWarmWaterPower();
-        return is_excess_buffering && can_continue;
+    doStartOpportunisticBuffering(min_power) { return min_power > this.heatpump.getMinExpectedPower(); }
+    canContinueOpportunisticBuffering(max_power) {
+        let is_buffering = this.heatpump.getMode() == HEATPUMP_MODE.BUFFERING;
+        let can_continue = max_power > this.heatpump.getMinExpectedPower();
+        return is_buffering && can_continue;
     }
 
     controlStrategySurplus(surplus, excess) {   
-        let min_surplus_power = surplus.percentile(20);
-        let max_surplus_power = surplus.percentile(80);
-        let min_excess_power = excess.percentile(50);
-        let max_excess_power = excess.percentile(90);
-        if(this.doStartOpportunisticExcessBuffering(min_excess_power) || 
-           this.canContinueOpportunisticExcessBuffering(max_excess_power)) {
+        let min_surplus_power = Math.min(surplus.percentile(20), surplus.tail(60).percentile(20));
+        let max_surplus_power = Math.max(surplus.tail(2*60).percentile(80), min_surplus_power);
+        let min_excess_power = excess.tail(60).percentile(30);
+        let max_excess_power = Math.max(excess.tail(60).percentile(90), min_excess_power);
+        if(this.doStartOpportunisticBuffering(min_excess_power) || 
+           this.canContinueOpportunisticBuffering(max_excess_power)) {
             // Opportunistic Buffering if there is excess
             this.heatpump.setMode(HEATPUMP_MODE.BUFFERING);
             this.heatpump.control(min_excess_power, max_excess_power);
@@ -181,7 +180,7 @@ class HeatPumpManager {
             this.heatpump.setMode(HEATPUMP_MODE.EFFICIENT_HEATING_ONLY);
             this.heatpump.control(min_surplus_power, max_surplus_power);
         } else if(isAfternoon() && this.doStartSurplusBufferingNow()) {
-            this.heatpump.setMode(HEATPUMP_MODE.EFFICIENT_BUFFERING);
+            this.heatpump.setMode(HEATPUMP_MODE.BUFFERING);
             this.heatpump.control(min_surplus_power, max_surplus_power);
         } else {
             console.log("Strategy SURPLUS not feasible anymore - changing.");
@@ -190,8 +189,8 @@ class HeatPumpManager {
     }
 
     controlStrategyExcess(excess) {
-        let min_excess_power = excess.percentile(50);
-        let max_excess_power = excess.percentile(90);
+        let min_excess_power = Math.min(excess.tail(5*60).percentile(50), excess.tail(60).percentile(25));
+        let max_excess_power = Math.max(excess.tail(2*60).percentile(90), min_excess_power);
         if(this.checkExcessBoilerOnlyFeasible()) {
             // Try to get by with only using the electric boiler for warmwater
             // while keeping heating efficient
@@ -199,7 +198,13 @@ class HeatPumpManager {
             this.heatpump.control(min_excess_power, max_excess_power);
         } else if(this.checkExcessHeatPumpFeasible()) {
             // Try to use the remaining excess power for buffering.
-            // Be quite tolerant with excess lows (as they eat into surplus)
+            // Be quite tolerant with excess lows (as they eat into surplus only).
+            // But be efficient / do not heat beyond an efficient temperature
+            // if in the morning or not yet close to the end of the excess window to be able to use the boiler
+            // for warmwater in the afternoon should there still be some excess.
+            this.heatpump.setMode(HEATPUMP_MODE.EFFICIENT_BUFFERING);
+            this.heatpump.control(min_excess_power, max_excess_power);
+        } else if(isAfternoon() && this.doStartExcessHeatPumpBufferingNow()) {
             this.heatpump.setMode(HEATPUMP_MODE.BUFFERING);
             this.heatpump.control(min_excess_power, max_excess_power);
         } else {
@@ -211,11 +216,14 @@ class HeatPumpManager {
     updateState() {
         this.heatpump.updateState();
         
+        let target_ww_temp = DEFAULT_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp();
+        let target_heating_temp = DEFAULT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp();
+
         this.remaining_boiler_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.heatpump.getExpectedBoilerPower());
-        this.remaining_warmwater_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.heatpump.getExpectedWarmWaterPower());
-        this.remaining_heating_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.heatpump.getExpectedHeatingPower()); 
-        this.remaining_heating_surplus_time = this.pv_forecast.estimateRemainingSurplusToday(this.heatpump.getExpectedHeatingPower());
-        this.remaining_warmwater_surplus_time = this.pv_forecast.estimateRemainingSurplusToday(this.heatpump.getExpectedWarmWaterPower());
+        this.remaining_warmwater_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.heatpump.calculateExpectedWarmWaterPowerAtTemp(target_ww_temp));
+        this.remaining_heating_excess_time = this.pv_forecast.estimateRemainingExcessToday(this.heatpump.calculateExpectedHeatingPower(target_heating_temp)); 
+        this.remaining_heating_surplus_time = this.pv_forecast.estimateRemainingSurplusToday(this.heatpump.calculateExpectedHeatingPower(target_heating_temp));
+        this.remaining_warmwater_surplus_time = this.pv_forecast.estimateRemainingSurplusToday(this.heatpump.calculateExpectedWarmWaterPowerAtTemp(target_ww_temp));
     }
     
     control(surplus, excess) {

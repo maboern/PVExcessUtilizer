@@ -27,7 +27,9 @@ class ControllableLoad {
         this.last_started_at = 0;
         this.max_day_runtime_secs = 12*60*60;
         this.day_energy = 0;
+        this.non_load_consumption_buf = new RingBuffer(60);
         this.self_shutoff_at = 0;
+        this.min_break_after_self_shutoff_secs = 45*60; 
 
         this.is_connected_obj = null;
         this.switch_obj = null;
@@ -54,6 +56,7 @@ class ControllableLoad {
         this.day_energy = getState(this.day_energy_obj).val;
         this.max_day_runtime_secs = getState(this.max_day_runtime_mins_obj).val*60;
     }
+    setMinRuntimeSecs(min_runtime_secs) { this.min_runtime_secs = min_runtime_secs; }
 
     isOn() { return this.isReady() && getState(this.switch_obj).val; }
     toString() { return `Load ${this.name} (${this.load_type})`; }
@@ -132,7 +135,7 @@ class ControllableLoad {
     }
 
     getMeasuredPower() {
-        return getStateIfExistingWithMaxAge(this.measured_power_obj, 60, 0);
+        return getStateIfExisting(this.measured_power_obj, this.expected_power);
     }
 
     getCurrentPower() {
@@ -146,16 +149,19 @@ class ControllableLoad {
         return 0;
     }
 
+    allowedToRunAgainAfterSelfShutoff() {
+        return (this.self_shutoff_at == 0 || ((Date.now() - this.self_shutoff_at) > this.min_break_after_self_shutoff_secs * 1000));
+    } 
+
     allowedToRun() {
         if(this.isReady()) {
             if(this.runtime_secs < this.max_day_runtime_secs) {
-                return true;
-            } else {
-                return false;
+                if(this.allowedToRunAgainAfterSelfShutoff()) {
+                    return true;
+                }
             }
-        } else {
-            return false;
-        }   
+        }
+        return false;
     }
     
     allowedToStop() {
@@ -174,7 +180,7 @@ class ControllableLoad {
         // the expected power or has turned itself off
         if(this.measured_power_obj && this.getMeasuredPower() > 0) {
             return true;
-        } else if(non_load_consumption >= 0) {
+        } else if(this.non_load_consumption_buf.percentile(20) >= 0) {
             // The non-load consumption already has subtracted the expected consumption of
             // unmeasured loads. So only if we have a deficit here, we expect that 
             // we may not be running
@@ -188,6 +194,7 @@ class ControllableLoad {
 
     validateRunning(non_load_consumption) {
         if(this.isOn()) {
+            this.non_load_consumption_buf.push(non_load_consumption);
             if(!this.allowedToRun()) {
                 console.log("Load " + this.name + " is not allowed to run anymore. Stopping.");
                 this.stop(0);
@@ -201,6 +208,7 @@ class ControllableLoad {
                 return true;
             }
         } else {
+            this.non_load_consumption_buf.clear();
             return false;
         }
     }
@@ -215,10 +223,10 @@ class ControllableLoad {
     }
 
     control(interval, min_available_power, max_available_power) {
+        this.checkMaxRuntimeUpdated();
         if(!this.isReady()) {
             return false;
         }
-        this.checkMaxRuntimeUpdated();
 
         if(this.isOn()) {
             if(this.hasRunForMinimumTime()) {

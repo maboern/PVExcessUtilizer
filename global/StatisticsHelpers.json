@@ -30,14 +30,30 @@ function smooth(smoothed_value, new_value, dynamics) {
 
 class RingBuffer {
     constructor(length) {
-        this.pointer = 0;
         this.length = length;
+        this.clear();
+    }
+
+    clear() {
+        this.pointer = 0;
         this.buffer = [];
+        this.count = 0;
     }
 
     push(item) {
         this.buffer[this.pointer] = item;
         this.pointer = (this.length + this.pointer + 1) % this.length;
+        this.count += 1;
+    }
+
+    set(array) {
+        if(array.length <= this.length) {
+            this.buffer = array.slice();
+            this.count = array.length;
+        } else {
+            this.buffer = array.slice(array.length - this.length);
+            this.count = this.length;
+        }
     }
 
     linearize() {
@@ -47,6 +63,13 @@ class RingBuffer {
     last() {
         if(this.pointer - 1 >= 0) { return this.buffer[this.pointer - 1]; }
         return this.buffer[this.length - 1];
+    }
+
+    tail(count) {
+        const linearized = this.linearize();
+        var tail_buf = new RingBuffer(count);
+        tail_buf.set(linearized.slice(-1*count));
+        return tail_buf;
     }
     
     smooth(dynamics) {

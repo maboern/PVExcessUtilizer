@@ -50,6 +50,7 @@ class PVSystem {
         this.PV_MAX_DYNAMICS = 0.2;
         this.PV_MEASUREMENT_DYNAMICS = 0.01;
         this.PV_MEASUREMENT_LOOKBACK_SECS = 60;
+        this.PV_AVAILABLE_POWER_LOOKBACK_SECS = 10*60;
 
         this.estimation_mode = PV_POWER_ESTIMATION_MODE.MAX;
         this.mppt = new MpptCurtailmentEstimator(this.root_obj, this.INV15_VOLTAGE_B_OBJ, this.INV15_NR_PV_PANELS_B);
@@ -71,8 +72,8 @@ class PVSystem {
         this.pv_excess_power_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.pv_excess_power_smoothed = 0;
         this.controllable_load_power = 0;
-        this.available_excess_power_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
-        this.available_surplus_power_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
+        this.available_excess_power_buffer = new RingBuffer(this.PV_AVAILABLE_POWER_LOOKBACK_SECS);
+        this.available_surplus_power_buffer = new RingBuffer(this.PV_AVAILABLE_POWER_LOOKBACK_SECS);
         this.pv_shading_loss = 0;
         this.irradiance = 0;
 
@@ -192,7 +193,9 @@ class PVSystem {
     }
 
     isCurtailed() {
-        return this.isCurtailedFeedInValue(this.pv_feedin_power_buffer.max());
+        const CURTAILMENT_LOOKBACK_SECS = 15;
+        let curtailment_lookback_buf = this.pv_feedin_power_buffer.tail(CURTAILMENT_LOOKBACK_SECS);
+        return this.isCurtailedFeedInValue(curtailment_lookback_buf.max()); 
     }
 
     updateIrradianceEstimate() {
@@ -201,14 +204,16 @@ class PVSystem {
         const NOMINAL_MODULE_IRRADIANCE = 800;
         var power_factor = 1 + (POWER_TEMPERATURE_COEFFICIENT * (this.mppt.getPanelTemperature() - NOMINAL_MODULE_AMBIENT_TEMPERATURE)); 
         const NOMINAL_POWER = 332 * 60; // 60 Panels x 332W at Nominal Conditions
+        
         let power_estimate = this.pv_power_estimate;
         if(this.isCurtailed()) {
             // If we are in curtailment, our estimate is based on MPPT Panel Tracking, which in turn
             // is dependent on panel temperature influenced by irradiance. So we can get "stuck" in a
             // certain steady state while the actually irradiance is rising. Combat this by giving the
-            // forecast some influence here.
-            let forecast_diff = this.pv_forecast.now() - power_estimate;
-            power_estimate += forecast_diff * this.mppt.getUncurtailedVoltageStaleness();
+            // forecast some influence here via max power estimate. This also guarantees it to be higher
+            // than the current power estimate.
+            let diff_to_estimated_max_power = this.pv_max_power_estimate - power_estimate;
+            power_estimate += diff_to_estimated_max_power * this.mppt.getUncurtailedVoltageStaleness();
         }
 
         this.irradiance = (power_estimate * NOMINAL_MODULE_IRRADIANCE) / (NOMINAL_POWER * power_factor);

@@ -6,17 +6,18 @@
 }
 -- do not edit previous lines - END --*/
 class ControllableBattery extends ControllableLoad {
-    constructor(script_id, name, capacity_wh, charging_power, shelly_id) {
+    constructor(script_id, name, capacity_wh, charging_power, power_draw_reduction_when_full, shelly_id) {
         super(script_id, name, CONTROLLABLE_LOAD_TYPE.BATTERY);
 
         this.capacity_wh = capacity_wh;
         this.max_level_of_charge_percent = 80;
         this.charging_loss_percent = 12;
-        this.max_day_runtime_secs = 5400;
-        this.startup_time_ms = 60 * 1000;
+        this.startup_time_ms = 2 * 60 * 1000;
         this.min_runtime_secs = 5 * 60;
 
         this.expected_power = charging_power;
+        // If battery draws less power, this indicates it is almost full. Set to 0 to skip detection.
+        this.power_draw_reduction_when_full = power_draw_reduction_when_full;
         this.load_hysteresis_power = 500;
         this.is_connected_obj = 'shelly.0.shellyplusplugs#' + shelly_id + '.online';
         this.switch_obj = 'shelly.0.shellyplusplugs#' + shelly_id + '.Relay0.Switch';
@@ -30,7 +31,7 @@ class ControllableBattery extends ControllableLoad {
     }
 
     toString() {
-        return super.toString() + ": " + this.capacity_wh + "Wh";
+        return super.toString() + ": " + this.capacity_wh + "Wh (" + Math.round(this.level_of_charge_percent) + "%/" + this.max_level_of_charge_percent + "%) charging at " + this.expected_power + "W";
     }
 
     updateLevelOfCharge(interval) {
@@ -46,10 +47,9 @@ class ControllableBattery extends ControllableLoad {
     }
 
     validateDrawingFullPower() {
-        const POWER_DRAW_TOLERANCE = 200;
-        if(this.hasStartedUp()) {
+        if(this.hasStartedUp() && this.power_draw_reduction_when_full > 0) {
             var measured_power = this.getMeasuredPower();
-            if(measured_power < this.expected_power - POWER_DRAW_TOLERANCE) {
+            if(measured_power < this.expected_power - this.power_draw_reduction_when_full) {
                 console.log("Load " + this.name + " is not drawing full power (" + measured_power + "/" + this.expected_power + "): Assuming 90%+ charged!");
                 this.level_of_charge_percent = 90;
                 setState(this.level_of_charge_percent_obj, this.level_of_charge_percent, true);

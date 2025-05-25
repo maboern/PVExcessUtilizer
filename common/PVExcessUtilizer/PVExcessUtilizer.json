@@ -5,6 +5,13 @@
   "verbose": false
 }
 -- do not edit previous lines - END --*/
+/* TODO:
+    - Offset to min/max power being 0 at the peak, higher in the mornging and lower in the afternoon for greedy buffering
+    - Modulated Heating: Differntial
+    - Opportunistic Buffering and / or Modulation depending on Percentile of Power in Forecast
+    - Solcast API, use 10%/90% spread to control available power lookback window
+*/
+
 // Static Script Parameters
 var SCRIPT_UPDATE_INTERVAL_SEC = 15;
 var SCRIPT_DEBUG = false;
@@ -12,6 +19,7 @@ const EXCESS_POWER_START_PERCENTILE = 80;
 const EXCESS_POWER_STOP_PERCENTILE = 10;
 var scriptRunTimeSecs = 0;
 var isReady = false;
+var unaccounted_power_smoothed = 0;
 var SCRIPT_ID = 'javascript.0.info';
 
 var SCRIPT_READY_OBJ = SCRIPT_ID + ".ready";
@@ -27,8 +35,9 @@ createState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, 0, {read: true, write: false, name: 
 
 let pv_forecast = new PVForecast(SCRIPT_ID, 13200, 4000);
 let pv = new PVSystem(SCRIPT_ID, 'Turnerweg', pv_forecast);
-let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000, 1500, 'e465b8455ce8#1');
-let car = new ControllableBattery(SCRIPT_ID, 'Car', 78000, 1800, '08f9e0fdb4ac#1');
+let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000, 1500, 0, 'e465b8455ce8#1');
+let car = new ControllableBattery(SCRIPT_ID, 'Car', 78000, 1800, 0, '08f9e0fdb4ac#1');
+car.setMinRuntimeSecs(10*60);
 let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
 let heater = new ControllableHeater(SCRIPT_ID, 'CellarHeater');
 
@@ -98,43 +107,46 @@ function calculateDisposableLoadPower() {
 
 function validateRunning() {
     let controlled_load_power = pv.getControllableLoadPower();
-    var unaccounted_power = pv.getTotalConsumption() - controlled_load_power;
-    if(unaccounted_power < 0) 
+    let unaccounted_power = pv.getTotalConsumption() - controlled_load_power;
+    unaccounted_power_smoothed = smooth(unaccounted_power_smoothed, unaccounted_power, 0.25);
+    if(unaccounted_power_smoothed < 0) 
     {
-        console.log("Negative remaining non-load power: " + unaccounted_power + "! (Consumption: " + pv.getSelfConsumptionSmoothed() + ", Loads: " + controlled_load_power + ")");
+        console.log("Negative remaining non-load power: " + unaccounted_power_smoothed + "! (Consumption: " + pv.getSelfConsumptionSmoothed() + ", Loads: " + controlled_load_power + ")");
     }
-    boiler.validateRunning(unaccounted_power);
-    jackery.validateRunning(unaccounted_power);
-    heater.validateRunning(unaccounted_power);
-    car.validateRunning(unaccounted_power);
+    boiler.validateRunning(unaccounted_power_smoothed);
+    jackery.validateRunning(unaccounted_power_smoothed);
+    heater.validateRunning(unaccounted_power_smoothed);
+    car.validateRunning(unaccounted_power_smoothed);
 }
 
 function updateLoadControl(min_available_power, max_available_power)
 {
+    // The Heatpump is outside of priority order and always gets priority.
+    heatpump_mgr.control(pv.getRecentAvailableSurplusPowerMeasurements(), pv.getRecentAvailableExcessPowerMeasurements());
+
     // TODO: Calculate Confidence Level from Generation Nowcast (Power - Forecast)
     // and Consumption Forecast (SEMP / maybe Statistics)
+
+    // The order here defines load priority
     boiler.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
     var expected_boiler_power = boiler.isOn() ? boiler.getExpectedPower() : 0;
     min_available_power -= expected_boiler_power;
     max_available_power -= expected_boiler_power;
-
-    heater.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
-    var expected_heater_power = heater.isOn() ? heater.getExpectedPower() : 0;
-    min_available_power -= expected_heater_power;
-    max_available_power -= expected_heater_power;
-
-    jackery.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
-    var expected_jackery_power = jackery.isOn() ? jackery.getExpectedPower() : 0;
-    min_available_power -= expected_jackery_power;
-    max_available_power -= expected_jackery_power; 
 
     car.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
     var expected_car_power = car.isOn() ? car.getExpectedPower() : 0;
     min_available_power -= expected_car_power;
     max_available_power -= expected_car_power; 
 
-    //heatpump.control(min_available_power, max_available_power);
-    heatpump_mgr.control(pv.getRecentAvailableSurplusPowerMeasurements(), pv.getRecentAvailableExcessPowerMeasurements());
+    jackery.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
+    var expected_jackery_power = jackery.isOn() ? jackery.getExpectedPower() : 0;
+    min_available_power -= expected_jackery_power;
+    max_available_power -= expected_jackery_power;
+
+    heater.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
+    var expected_heater_power = heater.isOn() ? heater.getExpectedPower() : 0;
+    min_available_power -= expected_heater_power;
+    max_available_power -= expected_heater_power; 
 }
 
 function controlLoads() 

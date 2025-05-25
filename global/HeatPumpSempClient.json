@@ -22,6 +22,8 @@ class HeatPumpSempClient {
         this.warmwater_on = false;
         this.warmwater_power = 0;
         this.warmwater_max_power = 3954;
+        this.warmwater_started_ts = 0;
+        this.warmwater_stopped_ts = 0;
 
         this.warmwater_plan = false;
         this.warmwater_plan_earliest_start = 0;
@@ -31,12 +33,14 @@ class HeatPumpSempClient {
         this.warmwater_plan_max_power = 0;
 
         this.last_warmwater_request_ts = 0;
-        this.last_warmwater_request_on = null;
+        this.last_warmwater_request_on = false;
 
         this.heating_controllable = false;
         this.heating_on = false;
         this.heating_power = 0;
         this.heating_min_power = 996;
+        this.heating_started_ts = 0;
+        this.heating_stopped_ts = 0;
 
         this.heating_plan = false;
         this.heating_plan_earliest_start = 0;
@@ -47,7 +51,7 @@ class HeatPumpSempClient {
         this.heating_plan_max_energy = 0;
 
         this.last_heating_request_ts = 0;
-        this.last_heating_request_power = null;
+        this.last_heating_request_power = 0;
 
         this.WARMWATER_POWER_OBJ = this.root_obj + ".ww_power";
         createState(this.WARMWATER_POWER_OBJ, 0, {read: true, write: false, name: "WarmWaterPower", type: "number", unit: "W", def: 0});
@@ -75,17 +79,45 @@ class HeatPumpSempClient {
     getHeatingPower() { return this.heating_power; }
     getHeatingMinPower() { return this.heating_plan ? this.heating_plan_min_power : this.heating_min_power; }
 
+    processWarmWaterStatusUpdate(status) {
+        let warmwater_was_on = this.warmwater_on;
+        this.warmwater_controllable = status.Device2EM.DeviceStatus[0].EMSignalsAccepted == "true"; 
+        this.warmwater_on = status.Device2EM.DeviceStatus[0].Status == "On"; 
+        this.warmwater_power = Number(status.Device2EM.DeviceStatus[0].PowerConsumption.PowerInfo.AveragePower);
+
+        if(!warmwater_was_on && this.warmwater_on) {
+            console.log("Heatpump WarmWater STARTED");
+            this.warmwater_started_ts = Date.now();
+        } else if(warmwater_was_on && !this.warmwater_on) {
+            console.log("Heatpump WarmWater STOPPED");
+            this.warmwater_stopped_ts = Date.now();
+        }
+    }
+
+    processHeatingStatusUpdate(status) {
+        let heating_was_on = this.heating_on;
+        this.heating_controllable = status.Device2EM.DeviceStatus[1].EMSignalsAccepted == "true";
+        this.heating_on = status.Device2EM.DeviceStatus[1].Status == "On"; 
+        this.heating_power = Number(status.Device2EM.DeviceStatus[1].PowerConsumption.PowerInfo.AveragePower);
+
+        if(!heating_was_on && this.heating_on) {
+            console.log("Heatpump Heating STARTED");
+            this.heating_started_ts = Date.now();
+        } else if(heating_was_on && !this.heating_on) {
+            console.log("Heatpump Heating STOPPED");
+            this.heating_stopped_ts = Date.now()
+        }
+    }
+
     processStatusUpdate(data) {
         let status_json = xml2json.toJson(data);
         let status = JSON.parse(status_json);
 
-        this.warmwater_controllable = status.Device2EM.DeviceStatus[0].EMSignalsAccepted == "true"; 
-        this.warmwater_on = status.Device2EM.DeviceStatus[0].Status == "On"; 
-        this.warmwater_power = Number(status.Device2EM.DeviceStatus[0].PowerConsumption.PowerInfo.AveragePower);
-        this.heating_controllable = status.Device2EM.DeviceStatus[1].EMSignalsAccepted == "true";
-        this.heating_on = status.Device2EM.DeviceStatus[1].Status == "On"; 
-        this.heating_power = Number(status.Device2EM.DeviceStatus[1].PowerConsumption.PowerInfo.AveragePower);
-        
+        this.processWarmWaterStatusUpdate(status);
+        this.processHeatingStatusUpdate(status);
+
+        this.filterHeatpumpStartupPower();
+
         let plannings = status.Device2EM.PlanningRequest ? status.Device2EM.PlanningRequest.Timeframe : null;
         this.processPlanningUpdates(plannings);
     }
@@ -134,6 +166,29 @@ class HeatPumpSempClient {
     }
 
     
+    filterHeatpumpStartupPower() {
+        const STARTUP_GRACE_PERIOD = 2*60*1000; // The power reading is unreliable for the first few minutes.
+        const DEFAULT_STARTUP_POWER = 600;
+
+        if(isNowInTimePeriod(this.warmwater_started_ts, STARTUP_GRACE_PERIOD)) {
+            this.warmwater_power = DEFAULT_STARTUP_POWER;
+        }
+        if(isNowInTimePeriod(this.heating_started_ts, STARTUP_GRACE_PERIOD)) {
+            this.heating_power = DEFAULT_STARTUP_POWER;
+        }
+    }
+
+    filterHeatpumpShutdownPower() {
+        const SHUTDOWN_GRACE_PERIOD = 2*60*1000; // The power reading is unreliable after shutting off.
+        const DEFAULT_SHUTDOWN_POWER = 0;
+
+        if(isNowInTimePeriod(this.warmwater_stopped_ts, SHUTDOWN_GRACE_PERIOD)) {
+            this.warmwater_power = DEFAULT_SHUTDOWN_POWER;
+        }
+        if(isNowInTimePeriod(this.heating_stopped_ts, SHUTDOWN_GRACE_PERIOD)) {
+            this.heating_power = DEFAULT_SHUTDOWN_POWER;
+        }
+    }
 
     canReRequest(last_ts) { return (Date.now() >= last_ts + this.max_request_interval_s*1000); }
 
@@ -153,6 +208,8 @@ class HeatPumpSempClient {
             }
         } else {
             if(this.DEBUG) { console.log("Warmwater request skipped because HeatPump not controllable.");}
+            setState(this.REQ_WARMWATER_OBJ, false, true);
+            this.last_warmwater_request_on = false;
         }
         return false;
     }
@@ -173,6 +230,8 @@ class HeatPumpSempClient {
             }
         } else {
             if(this.DEBUG) { console.log("Heating request skipped because HeatPump not controllable.");}
+            setState(this.REQ_HEATING_POWER_OBJ, 0, true);
+            this.last_heating_request_power = 0;
         }
         return false;
     }

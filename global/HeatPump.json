@@ -37,6 +37,7 @@ class HeatPump {
 
         this.mode = HEATPUMP_MODE.EFFICIENT;
 
+        this.ambient_temperature_sensor_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.AUSSENTEMPERATUR';
         this.heating_buffer_temp_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.PUFFERISTTEMPERATUR';
         this.target_heating_buffer_temp_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.PUFFERSOLLTEMPERATUR';
         this.target_hk2_temp_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.SOLLTEMPERATUR_HK_2';
@@ -44,6 +45,8 @@ class HeatPump {
         this.summer_mode_obj = 'stiebel-isg.0.info.STATUSANLAGE.BETRIEBSSTATUS.SOMMERBETRIEB';
         this.hk2_pump_obj = 'stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.HEIZKREISPUMPE_2';
         this.hk3_pump_obj = 'stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.HEIZKREISPUMPE_3';
+        this.ww_output_power_kw_summer_obj = 'stiebel-isg.0.settings.WARMWASSER.WW LEISTUNG WP.val1126';
+        this.ww_output_power_kw_winter_obj = 'stiebel-isg.0.settings.WARMWASSER.WW LEISTUNG WP.val1127';
 
         this.required_boiler_runtime = 0;
         this.required_warmwater_runtime = 0;
@@ -51,15 +54,17 @@ class HeatPump {
 
         this.min_heatpump_runtime_mins = 15; // Do not start the heatpump if it is expected to run less than that time.
         this.heating_buffer_volume = 400; // 400 l
-        // TODO: Make temperature-dependent.
-        this.heating_expected_power = 1500; 
-        this.warmwater_expected_power = 2500; // 1.5kW@35° 1.9kW@44°, 2.7kW@48°, 5kW@55° (7kW output, 10° outside)
-        this.heatpump_efficiency_factor = 4 // How much heat energy the heat pump gets out for putting electric energy in
+        this.warmwater_output_power = 7000; // The heatpump works in a constant output (heat) power regime with variable electric power input
+        this.heating_expected_power = 1500;
+        this.warmwater_expected_power = 2500; 
 
         this.HK2_PUMP_OBJ = this.root_obj + ".hk2_pump";
         createState(this.HK2_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK2", type: "boolean", def: false});
         this.HK3_PUMP_OBJ = this.root_obj + ".hk3_pump";
         createState(this.HK3_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK3", type: "boolean", def: false});
+        this.EFFICIENCY_FACTOR = this.root_obj + ".efficiency";
+        createState(this.EFFICIENCY_FACTOR, 1, {read: true, write: false, name: "Heatpump Efficency Factor", type: "number", def: 1});
+
 
         this.updateState();
     }  
@@ -91,9 +96,54 @@ class HeatPump {
         return Math.max(target_hk2_temp, target_hk3_temp);
     }
 
+    calculateCurrentHeatPumpEfficiencyFactor() {
+        let ambient_temperature = getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 12*60*60, 10);
+        if(this.isHeatingOn()) {
+            return this.calculateHeatPumpEfficiencyFactor(ambient_temperature, this.getHeatingBufferTemp());
+        } else if(this.isWarmWaterOn()) {
+            return this.calculateHeatPumpEfficiencyFactor(ambient_temperature, this.boiler.getTemperature());
+        } else {
+            return 0;
+        }
+    }
+
+    calculateHeatPumpEfficiencyFactor(ambient_temp, output_temp) {
+        // Ambient:        W35           W55
+        // 20°C             6.21        3.56
+        // 10°C             5.48
+        //  7°C             4.72        3.19
+        //  2°C             4.00        2.91
+        // -7°C             3.00        2.34
+        //-15°C             2.67        2.07
+        // Approximate with pessimistic values (datasheet does not account for fan/pump/spread)
+        const HEATPUMP_SPREAD_DEGREES = 4;
+
+        let temp_delta = output_temp + HEATPUMP_SPREAD_DEGREES - ambient_temp;
+        if(temp_delta < 15) { return 6; } else
+        if(temp_delta < 25) { return 5 + (25 - temp_delta)/10; } else
+        if(temp_delta < 35) { return 4 + (35 - temp_delta)/10; } else 
+        if(temp_delta < 45) { return 3 + (45 - temp_delta)/10; } else
+        if(temp_delta < 55) { return 2 + (55 - temp_delta)/10; }
+        else { return 1; }
+    }
+
+    calculateExpectedHeatingOutputPower() {
+        // Auslegung Heizug: 7.8kW @ -10°C - linear interpolation to 0kW @ +20°C
+        let ambient_temperature = getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 12*60*60, 10);
+        let output_power = 7800 * (30 - (ambient_temperature + 10)) / 30;
+        return output_power;
+    }
+
+    calculateExpectedHeatingPower(target_temperature) {
+        let ambient_temperature = getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 12*60*60, 10);
+        let output_power = this.calculateExpectedHeatingOutputPower();
+        let input_power = output_power / this.calculateHeatPumpEfficiencyFactor(ambient_temperature, target_temperature);
+        return input_power;
+    }
+
     calculateHeatingRunMinsRequired(target_temperature) {
         var energy_kwh = this.calculateHeatingEnergyRequired(target_temperature);
-        var time_hours = (energy_kwh * 1000) / (this.heating_expected_power * this.heatpump_efficiency_factor);
+        var time_hours = (energy_kwh * 1000) / (this.calculateExpectedHeatingOutputPower());
         return Math.round(time_hours * 60);
     }
     
@@ -113,9 +163,28 @@ class HeatPump {
         return required_energy_kwh;
     }
 
+    calculateExpectedWarmWaterPowerAtTemp(warmwater_temp) {
+        let ambient_temperature = getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 12*60*60, 10);
+        let temperature_delta = warmwater_temp - ambient_temperature;
+
+        // Measured power: 1.5kW@35° 1.9kW@44°, 2.7kW@48°, 5kW@55° (7kW output power, 10°C outside)
+        // => 1500W @ 25° delta, 1900W @ 34° delta, 2700W @ 38° delta, 5000W @ 45° delta
+        // Linearize between these points
+
+        if(temperature_delta < 25) {
+            return 1500;
+        } else if(temperature_delta < 34) {
+            return 1500 + (temperature_delta - 25) * 44;
+        } else if(temperature_delta < 38) {
+            return 1900 + (temperature_delta - 34) * 200;
+        } else {
+            return 2700 + (temperature_delta - 38) * 329;
+        }
+    }
+
     calculateWarmWaterRunMinsRequired(target_temperature) {
         var energy_kwh = this.calculateWarmWaterEnergyRequired(target_temperature);
-        var time_hours = (energy_kwh * 1000) / (this.warmwater_expected_power * this.heatpump_efficiency_factor);
+        var time_hours = (energy_kwh * 1000) / (this.warmwater_output_power); 
         return Math.round(time_hours * 60);
     }
 
@@ -149,9 +218,14 @@ class HeatPump {
     getRequiredWarmWaterRunTime() { return this.required_warmwater_runtime; }
     getRequiredBoilerRunTime() { return this.required_boiler_runtime; }
     getRequiredHeatingRunTime() { return this.required_heating_runtime; }
+    getRequiredWarmWaterRunTimeToMaxBuffer() { return this.calculateWarmWaterRunMinsRequired(MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp());}
+    getRequiredBoilerRunTimeToMaxBuffer() { return this.calculateBoilerRunMinsRequired(MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp()); }
+    getRequiredHeatingRunTimeToMaxBuffer() { return this.calculateHeatingRunMinsRequired(MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp()); }
     getExpectedWarmWaterPower() { return this.warmwater_expected_power; }
     getExpectedHeatingPower() { return this.heating_expected_power; }
     getExpectedBoilerPower() { return this.boiler.getExpectedPower(); }
+    getMinExpectedPower() { return this.isInSummerMode() ? this.getExpectedWarmWaterPower() : 
+                            Math.min(this.getExpectedWarmWaterPower, this.getExpectedHeatingPower()); }
 
     getCurrentPower() { return this.semp_client.getHeatingPower() + this.semp_client.getWarmWaterPower(); }
 
@@ -164,12 +238,12 @@ class HeatPump {
     }
 
     controlBufferingEfficient(min_available_power, max_available_power) {
-        this.controlEfficientHeating(min_available_power, max_available_power);
+        this.controlEfficientHeatingOnly(min_available_power, max_available_power);
         this.controlWarmWater(min_available_power, max_available_power);
     }
 
     controlEfficient(min_available_power, max_available_power) {
-        this.controlEfficientHeating(min_available_power, max_available_power);
+        this.controlEfficientHeatingOnly(min_available_power, max_available_power);
         this.controlWarmWater(min_available_power, max_available_power);
     }
 
@@ -179,7 +253,9 @@ class HeatPump {
     }
 
     controlWarmWater(min_available_power, max_available_power) {
-        let expected_power_consumption = this.isWarmWaterOn() ? this.semp_client.getWarmWaterPower() : this.warmwater_expected_power;
+        let expected_power_consumption = this.isWarmWaterOn() ? this.semp_client.getWarmWaterPower() : this.getExpectedWarmWaterPower();
+        
+        if(this.DEBUG) { console.log("Expected WW Power: " + expected_power_consumption + "W, Min AV: " + min_available_power + "W, Max AV: " + max_available_power + "W"); }
         if(this.isWarmWaterAllowedToStart() || (this.isWarmWaterOn() && this.semp_client.isWarmWaterControllable())) {
             if(min_available_power >= expected_power_consumption && !this.hasReachedWarmWaterTemp()) {
                 if(this.semp_client.requestWarmWater(true, false)) {
@@ -187,10 +263,14 @@ class HeatPump {
                 }
             } 
         }
-        if(this.isWarmWaterAllowedToStop()) {
-            if(max_available_power < expected_power_consumption) {
+        this.stopWarmWaterIfNecessary(expected_power_consumption, max_available_power)
+    }
+
+    stopWarmWaterIfNecessary(expected_power_consumption, available_power) {
+       if(this.isWarmWaterAllowedToStop()) {
+            if(available_power < expected_power_consumption) {
                 if(this.semp_client.requestWarmWater(false, false)) {
-                    console.log("Requested WarmWater OFF because of low available power: " + max_available_power + "W / " + expected_power_consumption + "W");
+                    console.log("Requested WarmWater OFF because of low available power: " + available_power + "W / " + expected_power_consumption + "W");
                 }
             } else if(this.hasReachedWarmWaterTemp()) {
                 if(this.semp_client.requestWarmWater(false, false)) {
@@ -223,20 +303,28 @@ class HeatPump {
     }
 
     calculateModulatedHeatingPower(min_available_power, max_available_power) {
-        const TARGET_TEMP_INFLUENCE = 100;
+        if(this.isInSummerMode) { return 0; }
+        
+        const TARGET_TEMP_INFLUENCE = 50;
         let min_power = this.semp_client.getHeatingMinPower();
-
-        let cur_power = this.isHeatingOn() ? this.semp_client.getHeatingPower() : min_power;
+        let cur_power = this.semp_client.getHeatingPower();
         let temp_diff = this.calculateTargetModulatedHeatingBufferTemp() - this.getHeatingBufferTemp();
 
-        let desired_power = temp_diff > 0 ? min_available_power : max_available_power;
+        // TODO: really necessary to add another temperature boost here?
+        //let max_desirable_power = min_available_power + (max_available_power - min_available_power)*(temp_diff / 5);
+        //let desired_power = temp_diff > 0 ? max_desirable_power : min_available_power;
+        let desired_power = min_available_power; 
         let power_diff = desired_power - cur_power;
 
-        let availability_factor = Math.min((10 + temp_diff) / 10, 1); // 10° difference makes available power ignored.
+        let availability_factor = Math.min(1 - (Math.abs(temp_diff / 10)), 1); // 10° difference makes available power ignored.
         let availability_offset = power_diff * availability_factor;
-        let target_offset = temp_diff * TARGET_TEMP_INFLUENCE;
+        let target_offset = temp_diff * Math.abs(temp_diff) * TARGET_TEMP_INFLUENCE; // Quadratic influence of temp_diff
         let recommended_power = Math.min(cur_power + availability_offset + target_offset, desired_power);
-        recommended_power = Math.max(recommended_power, min_power);
+        if(recommended_power > min_power/2) {
+            recommended_power = Math.max(recommended_power, min_power); 
+        } else {
+            recommended_power = 0;
+        }
         console.log("Modulating Heating Power: " + recommended_power + "W - Availability: " + availability_offset + "W (" + power_diff + "W), Target: " + target_offset + "W (" + temp_diff + "°C).");
         return recommended_power;
     }
@@ -246,8 +334,10 @@ class HeatPump {
         this.controlHeating(min_available_power, max_available_power, modulated_heating_power);
     }
 
-    controlEfficientHeating(min_available_power, max_available_power) {
+    controlEfficientHeatingOnly(min_available_power, max_available_power) {
         this.controlHeating(min_available_power, max_available_power, this.semp_client.getHeatingMinPower());
+        // Do not necessarily stop the Warmwater if it is running (after switching modes), but let it run to the
+        // (previous) target temperature
     }
 
     controlMaxBufferingHeating(min_available_power, max_available_power) {
@@ -258,7 +348,7 @@ class HeatPump {
     control(min_available_power, max_available_power) {
         switch(this.mode) {
             case HEATPUMP_MODE.EFFICIENT_HEATING_ONLY:
-                this.controlEfficientHeating(min_available_power, max_available_power);
+                this.controlEfficientHeatingOnly(min_available_power, max_available_power);
                 break;
             case HEATPUMP_MODE.MODULATED:
                 this.controlModulated(min_available_power, max_available_power);
@@ -284,10 +374,10 @@ class HeatPump {
             case HEATPUMP_MODE.EFFICIENT_HEATING_ONLY:
             case HEATPUMP_MODE.EFFICIENT:
                 return EFFICIENT_HEATPUMP_EMI_SETTINGS;
-            case HEATPUMP_MODE.MODULATED:
+            case HEATPUMP_MODE.EFFICIENT_BUFFERING:
                 return DEFAULT_HEATPUMP_EMI_SETTINGS;
             case HEATPUMP_MODE.BUFFERING:
-            case HEATPUMP_MODE.EFFICIENT_BUFFERING:
+            case HEATPUMP_MODE.MODULATED:
                 return MAX_BUFFER_HEATPUMP_EMI_SETTINGS;
             default:
                 console.error("Unsupported HEATPUMP MODE: " + this.mode);
@@ -297,6 +387,14 @@ class HeatPump {
 
     updateState() {
         this.semp_client.updateState();
+        this.warmwater_expected_power = this.calculateExpectedWarmWaterPowerAtTemp(this.boiler.getTemperature());
+        this.heating_expected_power = this.calculateExpectedHeatingPower(this.getHeatingBufferTemp());
+
+        if(this.isInSummerMode()) {
+            this.warmwater_output_power = 1000 * getStateIfExisting(this.ww_output_power_kw_summer_obj, this.warmwater_output_power);
+        } else {
+            this.warmwater_output_power = 1000 * getStateIfExisting(this.ww_output_power_kw_winter_obj, this.warmwater_output_power);
+        }
         
         let target = this.getTargetSettings();
         this.required_boiler_runtime = this.calculateBoilerRunMinsRequired(target.getWarmWaterTemp());   
@@ -307,6 +405,8 @@ class HeatPump {
         setState(this.HK2_PUMP_OBJ, this.hk2_pump_on, true);
         this.hk3_pump_on = getStateIfExisting(this.hk3_pump_obj, false);
         setState(this.HK3_PUMP_OBJ, this.hk3_pump_on, true);
+        let efficiency_factor = this.calculateCurrentHeatPumpEfficiencyFactor();
+        setState(this.EFFICIENCY_FACTOR, efficiency_factor, true);
 
         this.semp_client.writeState();
 

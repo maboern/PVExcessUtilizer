@@ -16,13 +16,15 @@ class MpptPanelTempTracker {
         this.NOMINAL_MODULE_AMBIENT_TEMPERATURE = 20;
         this.NOMINAL_MODULE_OPERATING_TEMPERATURE_OFFSET = this.NOMINAL_MODULE_OPERATING_TEMPERATURE - this.NOMINAL_MODULE_AMBIENT_TEMPERATURE;
         this.NOMINAL_MODULE_IRRADIANCE = 800;
-        this.HEATING_TEMPERATURE_DYNAMICS = 0.02;
-        this.COOLING_TEMPERATURE_DYNAMICS = 0.004;
+        this.UNSHADED_AMBIENT_TEMPERATURE_BOOST_BY_IRRADIANCE = 3 / 1000; // 3°C at max irradiance (1000W/m2)
+        this.AMBIENT_TEMPERATURE_DYNAMICS = 0.0005;
+        this.HEATING_TEMPERATURE_DYNAMICS = 0.01;
+        this.COOLING_TEMPERATURE_DYNAMICS = 0.002;
         this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT = -0.0027; // Delta_U = -0.27% / °C
 
         this.panel_temperature = 25; 
         this.ambient_temperature = 20; 
-        this.ambient_temperature_sensor_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.AUSSENTEMPERATUR'
+        this.ambient_temperature_sensor_obj = 'stiebel-isg.0.info.ANLAGE.HEIZUNG.AUSSENTEMPERATUR';
 
         this.root_obj = parent_root_obj + '.temp';
         this.TEMPERATURE_ESTIMATE_OBJ = this.root_obj + ".module_temperature";
@@ -31,11 +33,11 @@ class MpptPanelTempTracker {
         this.restoreState();
     }
     restoreState() {
-        this.updateAmbientTemperature();
+        this.ambient_temperature = getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 3*60*60, this.ambient_temperature);
         var panel_temp = getStateIfExistingWithMaxAge(this.TEMPERATURE_ESTIMATE_OBJ, 10*60, -9999);
         if(panel_temp != -9999) {
             this.panel_temperature = panel_temp;
-            console.log("Updating panel temperature from state: " + this.panel_temperature + "°C @ ambient: " + this.ambient_temperature + "°C.");
+            console.log("Updating panel temperature from state: " + Math.round(this.panel_temperature) + "°C @ ambient: " + this.ambient_temperature + "°C.");
         } else {
             console.warn("Coud not restore panel temperature from state!");
         }
@@ -44,16 +46,21 @@ class MpptPanelTempTracker {
     getPanelTemperature() { return this.panel_temperature; }
     process(irradiance) {
         // Calculate the temperature after the cell reaches thermal equilibrium with the current irradiance
-        var normalized_irradiance = irradiance / this.NOMINAL_MODULE_IRRADIANCE;
-        var equilibrium_panel_temperature = this.ambient_temperature + (normalized_irradiance * this.NOMINAL_MODULE_OPERATING_TEMPERATURE_OFFSET);
+        let normalized_irradiance = irradiance / this.NOMINAL_MODULE_IRRADIANCE;
+        let ambient_temperature = getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 3*60*60, this.ambient_temperature);
+        let ambient_equilibrium_temperature = ambient_temperature + irradiance * this.UNSHADED_AMBIENT_TEMPERATURE_BOOST_BY_IRRADIANCE;
+        let ambient_temperature_diff = ambient_equilibrium_temperature - this.ambient_temperature;
+        this.ambient_temperature += ambient_temperature_diff * this.AMBIENT_TEMPERATURE_DYNAMICS;
+        
+        let equilibrium_panel_temperature = this.ambient_temperature + (normalized_irradiance * this.NOMINAL_MODULE_OPERATING_TEMPERATURE_OFFSET);
 
         if(this.SCRIPT_DEBUG) {
             console.info("Normalized irradiance: " + normalized_irradiance + ", Equilibrium Temp: " + equilibrium_panel_temperature + ".");
         }
 
         // Adjust the current cell temperature towards thermal equilibrium with Exponential Moving Average
-        var temperature_diff = equilibrium_panel_temperature - this.panel_temperature;
-        var temperature_dynamics = 0;
+        let temperature_diff = equilibrium_panel_temperature - this.panel_temperature;
+        let temperature_dynamics = 0;
         if(temperature_diff > 0) {
             // Apply a higher temperature coefficient when heating up compared to cooling down
             temperature_dynamics = this.HEATING_TEMPERATURE_DYNAMICS;
@@ -74,13 +81,7 @@ class MpptPanelTempTracker {
         return temperature_corrected_voltage;
     }
 
-    updateAmbientTemperature() {
-        return getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 3*60*60, this.ambient_temperature);
-    }
-
     writeState() {
         setState(this.TEMPERATURE_ESTIMATE_OBJ, this.panel_temperature, true);
-
-        this.updateAmbientTemperature();
     }
 }
