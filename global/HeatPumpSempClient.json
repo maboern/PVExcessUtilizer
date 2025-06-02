@@ -18,6 +18,8 @@ class HeatPumpSempClient {
         this.device_id_warmwater = '0-0000A83A-0202A0669206-00'
         this.device_id_heating = '0-0000A83A-0202A0669206-01';
 
+        this.status_up_to_date = false; // Will bet set to true with first status update
+
         this.warmwater_controllable = false;
         this.warmwater_on = false;
         this.warmwater_power = 0;
@@ -71,11 +73,13 @@ class HeatPumpSempClient {
 
     isWarmWaterControllable() { return this.warmwater_controllable; }
     isWarmWaterOn() { return this.warmwater_on; }
+    getWarmWaterStartTimeStamp() { return this.warmwater_started_ts; }
     getWarmWaterPower() { return this.warmwater_power; }
     getWarmWaterMaxPower() { return this.warmwater_plan ? this.warmwater_plan_max_power : this.warmwater_max_power; }
 
     isHeatingControllable() { return this.heating_controllable; }
     isHeatingOn() { return this.heating_on; }
+    getHeatingStartTimeStamp() { return this.heating_started_ts; }
     getHeatingPower() { return this.heating_power; }
     getHeatingMinPower() { return this.heating_plan ? this.heating_plan_min_power : this.heating_min_power; }
 
@@ -85,12 +89,14 @@ class HeatPumpSempClient {
         this.warmwater_on = status.Device2EM.DeviceStatus[0].Status == "On"; 
         this.warmwater_power = Number(status.Device2EM.DeviceStatus[0].PowerConsumption.PowerInfo.AveragePower);
 
-        if(!warmwater_was_on && this.warmwater_on) {
-            console.log("Heatpump WarmWater STARTED");
-            this.warmwater_started_ts = Date.now();
-        } else if(warmwater_was_on && !this.warmwater_on) {
-            console.log("Heatpump WarmWater STOPPED");
-            this.warmwater_stopped_ts = Date.now();
+        if(this.status_up_to_date) {
+            if(!warmwater_was_on && this.warmwater_on) {
+                console.log("Heatpump WarmWater STARTED");
+                this.warmwater_started_ts = Date.now();
+            } else if(warmwater_was_on && !this.warmwater_on) {
+                console.log("Heatpump WarmWater STOPPED");
+                this.warmwater_stopped_ts = Date.now();
+            }
         }
     }
 
@@ -100,12 +106,14 @@ class HeatPumpSempClient {
         this.heating_on = status.Device2EM.DeviceStatus[1].Status == "On"; 
         this.heating_power = Number(status.Device2EM.DeviceStatus[1].PowerConsumption.PowerInfo.AveragePower);
 
-        if(!heating_was_on && this.heating_on) {
-            console.log("Heatpump Heating STARTED");
-            this.heating_started_ts = Date.now();
-        } else if(heating_was_on && !this.heating_on) {
-            console.log("Heatpump Heating STOPPED");
-            this.heating_stopped_ts = Date.now()
+        if(this.status_up_to_date) {
+            if(!heating_was_on && this.heating_on) {
+                console.log("Heatpump Heating STARTED");
+                this.heating_started_ts = Date.now();
+            } else if(heating_was_on && !this.heating_on) {
+                console.log("Heatpump Heating STOPPED");
+                this.heating_stopped_ts = Date.now()
+            }
         }
     }
 
@@ -120,6 +128,8 @@ class HeatPumpSempClient {
 
         let plannings = status.Device2EM.PlanningRequest ? status.Device2EM.PlanningRequest.Timeframe : null;
         this.processPlanningUpdates(plannings);
+
+        this.status_up_to_date = true;
     }
 
     processPlanningUpdates(plannings) {
@@ -164,7 +174,6 @@ class HeatPumpSempClient {
             this.heating_plan = false;
         }
     }
-
     
     filterHeatpumpStartupPower() {
         const STARTUP_GRACE_PERIOD = 2*60*1000; // The power reading is unreliable for the first few minutes.

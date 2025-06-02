@@ -11,7 +11,9 @@ class PVForecast {
         this.DEBUG = false;
 
         this.update_interval_ms = 5*60*1000;
-        this.base_power_reserve = 2000 + 600; // ~600W background power + 1 major device as tolerance
+        this.base_power_reserve = 700; // ~700W background power
+        this.ondemand_power_reserve = 2000; // 1 major device as on-demand power
+        this.ondemand_power_on_ratio = 0.5; // active 50% of the time
         this.feedin_limit_power = feedin_limit_power;
         this.default_load_power = default_load_power;
         this.excess_power_threshold = this.feedin_limit_power + this.base_power_reserve; 
@@ -44,32 +46,56 @@ class PVForecast {
 
     getUpdateIntervalMs() { return this.update_interval_ms; }
 
-    estimateRemainingExcessToday(controllable_load_power) {
-        return this.estimateRemainingToday(controllable_load_power, this.excess_power_threshold);
+    estimateRemainingExcessToday(expected_load_power) {
+        return this.estimateRemainingToday(expected_load_power, this.excess_power_threshold, this.ondemand_power_reserve);
     }
 
-    estimateRemainingSurplusToday(controllable_load_power) {
-        return this.estimateRemainingToday(controllable_load_power, this.surplus_power_threshold);
+    estimateRemainingSurplusToday(expected_load_power) {
+        return this.estimateRemainingToday(expected_load_power, this.surplus_power_threshold, this.ondemand_power_reserve);
     }
 
-    estimateRemainingToday(controllable_load_power, power_threshold) {
+    estimateRemainingToday(expected_load_power, base_power_threshold, ondemand_power_reserve) {
         var datetime = new Date();
-        
+
         const STEP_SIZE_MINUTES = 5;
         var total_extra_energy = 0;
         var total_extra_minutes = 0;
         while(datetime.getHours() <= 21) {
             var slot_power = this.getForecast(datetime);
-            var extra_power = slot_power - power_threshold;
-            if(extra_power >= controllable_load_power) {
-                total_extra_energy += extra_power * (STEP_SIZE_MINUTES/60); // Energy in Wh
+            var extra_power_max = slot_power - base_power_threshold;
+            var extra_power_min = slot_power - base_power_threshold - ondemand_power_reserve;
+            if(extra_power_min >= expected_load_power) {
+                total_extra_energy += extra_power_min * (STEP_SIZE_MINUTES/60); // Energy in Wh
                 total_extra_minutes += STEP_SIZE_MINUTES;
+            } else if(extra_power_max >= expected_load_power) {
+                total_extra_energy += extra_power_max * (STEP_SIZE_MINUTES/60) * this.ondemand_power_on_ratio; // Energy in Wh
+                total_extra_minutes += STEP_SIZE_MINUTES * this.ondemand_power_on_ratio;
             }
             datetime = addMinutes(datetime, STEP_SIZE_MINUTES);
         }
 
-        if(this.DEBUG) { console.log("Forecasting " + Math.round(total_extra_energy/1000) + "kWh above " + power_threshold/1000 + "kW for a " + controllable_load_power/1000 + "kW load across " + total_extra_minutes + " minutes remaining today."); }
+        if(this.DEBUG) { console.log("Forecasting " + Math.round(total_extra_energy/1000) + "kWh above " + (base_power_threshold + ondemand_power_reserve)/1000 + "kW for a " + expected_load_power/1000 + "kW load across " + total_extra_minutes + " minutes remaining today."); }
         return total_extra_minutes;
+    }
+
+    getPeakPower(peak_time) { return this.getForecast(peak_time); }
+    findPeakTime() {
+        var datetime = new Date();
+        
+        const STEP_SIZE_MINUTES = 5;
+        let peak_time = datetime;
+        let peak_power = 0;
+        while(datetime.getHours() <= 21) {
+            let slot_power = this.getForecast(datetime);
+            if(slot_power > peak_power) {
+                peak_time = datetime;
+                peak_power = slot_power;
+            }
+            datetime = addMinutes(datetime, STEP_SIZE_MINUTES);
+        }
+
+        console.log("Forecasting " + Math.round(peak_power) + "W peak at " + peak_time.toTimeString() + "today.");
+        return peak_time;
     }
 
     loadSampleTimeForecast(sample_time) {

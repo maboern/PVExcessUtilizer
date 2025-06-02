@@ -6,9 +6,12 @@
 }
 -- do not edit previous lines - END --*/
 /* TODO:
+    - Start warmwater before heatpump starts it by itself due to low temperature to avoid EMI-ACTIVE-ECO
+    - Start warmwater in Greedy to run during peak hours
     - Offset to min/max power being 0 at the peak, higher in the mornging and lower in the afternoon for greedy buffering
     - Modulated Heating: Differntial
-    - Opportunistic Buffering and / or Modulation depending on Percentile of Power in Forecast
+    - Opportunistic Surplus Buffering and / or Modulation depending on Percentile of Power in Forecast
+    - Only do opportunistic Excess buffering if Forecast (of next hour?) near threshold
     - Solcast API, use 10%/90% spread to control available power lookback window
 */
 

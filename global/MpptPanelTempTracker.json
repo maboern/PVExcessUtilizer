@@ -20,7 +20,7 @@ class MpptPanelTempTracker {
         this.AMBIENT_TEMPERATURE_DYNAMICS = 0.0005;
         this.HEATING_TEMPERATURE_DYNAMICS = 0.01;
         this.COOLING_TEMPERATURE_DYNAMICS = 0.002;
-        this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT = -0.0027; // Delta_U = -0.27% / °C
+        this.PANEL_VOLTAGE_TEMPERATURE_COEFFICIENT = -0.004; // Delta_U = -0.27% / °C. Too low in practice => round up
 
         this.panel_temperature = 25; 
         this.ambient_temperature = 20; 
