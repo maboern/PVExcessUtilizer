@@ -18,11 +18,11 @@
 // Static Script Parameters
 var SCRIPT_UPDATE_INTERVAL_SEC = 15;
 var SCRIPT_DEBUG = false;
-const EXCESS_POWER_START_PERCENTILE = 80;
-const EXCESS_POWER_STOP_PERCENTILE = 10;
+const EXCESS_POWER_START_PERCENTILE = 20;
+const EXCESS_POWER_STOP_PERCENTILE = 80;
 var scriptRunTimeSecs = 0;
 var isReady = false;
-var unaccounted_power_smoothed = 0;
+var non_controlled_consumption_smoothed = 0;
 var SCRIPT_ID = 'javascript.0.info';
 
 var SCRIPT_READY_OBJ = SCRIPT_ID + ".ready";
@@ -38,9 +38,8 @@ createState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, 0, {read: true, write: false, name: 
 
 let pv_forecast = new PVForecast(SCRIPT_ID, 13200, 4000);
 let pv = new PVSystem(SCRIPT_ID, 'Turnerweg', pv_forecast);
-let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000, 1500, 0, 'e465b8455ce8#1');
-let car = new ControllableBattery(SCRIPT_ID, 'Car', 78000, 1800, 0, '08f9e0fdb4ac#1');
-car.setMinRuntimeSecs(10*60);
+let jackery = new ControllableBattery(SCRIPT_ID, 'Jackery', 2000, 1500, 0, 5*60, 'e465b8455ce8#1');
+let car = new ControllableBattery(SCRIPT_ID, 'Car', 78000, 1800, 0, 10*60, '08f9e0fdb4ac#1');
 let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
 let heater = new ControllableHeater(SCRIPT_ID, 'CellarHeater');
 
@@ -109,17 +108,16 @@ function calculateDisposableLoadPower() {
 }
 
 function validateRunning() {
-    let controlled_load_power = pv.getControllableLoadPower();
-    let unaccounted_power = pv.getTotalConsumption() - controlled_load_power;
-    unaccounted_power_smoothed = smooth(unaccounted_power_smoothed, unaccounted_power, 0.25);
-    if(unaccounted_power_smoothed < 0) 
+    let non_controlled_consumption = pv.getTotalConsumption() - pv.getControllableLoadPower();
+    non_controlled_consumption_smoothed = smooth(non_controlled_consumption_smoothed, non_controlled_consumption, 0.25);
+    if(non_controlled_consumption_smoothed < 0) 
     {
-        console.log("Negative remaining non-load power: " + unaccounted_power_smoothed + "! (Consumption: " + pv.getSelfConsumptionSmoothed() + ", Loads: " + controlled_load_power + ")");
+        console.log("Negative remaining non-controlled consumption: " + non_controlled_consumption_smoothed + "! (Total Consumption: " + pv.getTotalConsumption() + ", Loads: " + pv.getControllableLoadPower() + ")");
     }
-    boiler.validateRunning(unaccounted_power_smoothed);
-    jackery.validateRunning(unaccounted_power_smoothed);
-    heater.validateRunning(unaccounted_power_smoothed);
-    car.validateRunning(unaccounted_power_smoothed);
+    boiler.validateRunning(non_controlled_consumption_smoothed);
+    jackery.validateRunning(non_controlled_consumption_smoothed);
+    heater.validateRunning(non_controlled_consumption_smoothed);
+    car.validateRunning(non_controlled_consumption_smoothed);
 }
 
 function updateLoadControl(min_available_power, max_available_power)
@@ -158,10 +156,16 @@ function controlLoads()
     let cur_disposable_load_power = calculateDisposableLoadPower();
     let excess_power = pv.getRecentExcessPowerMeasurements();
 
-    var min_available_power = excess_power.percentile(EXCESS_POWER_STOP_PERCENTILE) + cur_disposable_load_power;
+    let min_excess_power = Math.min(excess_power.tail(5*60).percentile(EXCESS_POWER_START_PERCENTILE),
+                                    excess_power.tail(60).percentile(EXCESS_POWER_START_PERCENTILE));
+    let min_available_power = min_excess_power + cur_disposable_load_power;
     setState(SCRIPT_AVAILABLE_MIN_WATTS_OBJ, min_available_power, true);
-    var max_available_power = excess_power.percentile(EXCESS_POWER_START_PERCENTILE) + cur_disposable_load_power;
+
+    let max_excess_power = Math.max(excess_power.tail(5*60).percentile(EXCESS_POWER_STOP_PERCENTILE),
+                                    excess_power.tail(60).percentile(EXCESS_POWER_STOP_PERCENTILE));
+    let max_available_power = max_excess_power + cur_disposable_load_power;
     setState(SCRIPT_AVAILABLE_MAX_WATTS_OBJ, max_available_power, true);
+
     let cur_total_load_power = pv.getControllableLoadPower();
     setState(SCRIPT_CONTROLLED_LOADS_WATTS_OBJ, cur_total_load_power, true);
     
@@ -180,6 +184,7 @@ function updateControl() {
 
 function atSunrise() {
     heatpump_mgr.updateAtSunrise();
+    pv_forecast.retrieve();
 }
 schedule('{"time":{"exactTime":true,"start":"sunrise"},"period":{"days":1}}', atSunrise);
 

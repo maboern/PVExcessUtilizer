@@ -10,10 +10,11 @@ class ControllableBoiler extends ControllableLoad {
         super(script_id, name, CONTROLLABLE_LOAD_TYPE.BOILER);
 
         this.expected_power = 4000;
-        this.load_hysteresis_power = 500;
-        this.is_connected_obj = 'modbus.2.info.connection';;
+        this.load_hysteresis_power_on = 250;
+        this.load_hysteresis_power_off = this.expected_power/6;
+        this.is_connected_obj = 'modbus.2.info.connection';
         this.switch_obj = 'modbus.2.coils.0_DO-00';
-        this.startup_time_ms = 15 * 1000;
+        this.startup_time_secs = 30;
         this.boiler_temperature = 0;
         this.boiler_max_temperature = 55; // Heating element stops at ~55°C
         this.boiler_volume = 500; // Boiler Capacity Volume
@@ -44,6 +45,10 @@ class ControllableBoiler extends ControllableLoad {
 
     allowedToRunAgainAfterSelfShutoff() {
         // Allow the water in the boiler to organize itself into layers before starting heating element again.
-        return (super.allowedToRunAgainAfterSelfShutoff() && !this.hasReachedMaxTemperature());
+        if(this.hasReachedMaxTemperature()) {
+            this.reason_for_stopping = "MAX BOILER TEMPERATURE";
+            return false;
+        }
+        return super.allowedToRunAgainAfterSelfShutoff();
     } 
 }

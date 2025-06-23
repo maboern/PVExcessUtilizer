@@ -83,16 +83,14 @@ class PVSystem {
         createState(this.PV_FEEDIN_WATTS_OBJ, 0, {read: true, write: false, name: "pvFeedInPower", type: "number", unit: "W", def: 0});
         this.PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ = this.root_obj + ".pv_feedin_limit_deviation_watts";
         createState(this.PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ, 0, {read: true, write: false, name: "pvFeedInLimitDeviation", type: "number", unit: "W", def: 0});
-        this.PV_FEEDIN_SPREAD_WATTS_OBJ = this.root_obj + ".pv_feedin_spread_watts";
-        createState(this.PV_FEEDIN_SPREAD_WATTS_OBJ, 0, {read: true, write: false, name: "pvFeedInSpread", type: "number", unit: "W", def: 0});
         this.PV_SHADING_LOSS_WATTS_OBJ = this.root_obj + ".pv_shading_loss_watts";
         createState(this.PV_SHADING_LOSS_WATTS_OBJ, 0, {read: true, write: false, name: "pvShadingLossPower", type: "number", unit: "W", def: 0});
         this.PV_UNUSED_EXCESS_WATTS_OBJ = this.root_obj + ".pv_unused_excess_watts";
         createState(this.PV_UNUSED_EXCESS_WATTS_OBJ, 0, {read: true, write: false, name: "pvProductionUnusedExcessPower", type: "number", unit: "W", def: 0});
         this.PV_SELF_CONSUMPTION_WATTS_OBJ = this.root_obj + ".pv_self_consumption_watts";
         createState(this.PV_SELF_CONSUMPTION_WATTS_OBJ, 0, {read: true, write: false, name: "pvSelfConsumptionPower", type: "number", unit: "W", def: 0});
-        this.PV_SELF_CONSUMPTION_SPREAD_OBJ = this.root_obj + ".pv_self_consumption_spread";
-        createState(this.PV_SELF_CONSUMPTION_SPREAD_OBJ, 0, {read: true, write: false, name: "pvSelfConsumptionSpread", type: "number", unit: "W", def: 0});
+        this.PV_TOTAL_CONSUMPTION_WATTS_OBJ = this.root_obj + ".pv_total_consumption_watts";
+        createState(this.PV_TOTAL_CONSUMPTION_WATTS_OBJ, 0, {read: true, write: false, name: "pvTotalConsumptionPower", type: "number", unit: "W", def: 0});
         this.PV_ESTIMATE_WATTS_OBJ = this.root_obj + ".pv_generation_estimate_watts";
         createState(this.PV_ESTIMATE_WATTS_OBJ, 0, {read: true, write: false, name: "pvGenerationEstimatePower", type: "number", unit: "W", def: 0});
         this.PV_ESTIMATE_MAX_WATTS_OBJ = this.root_obj + ".pv_generation_max_estimate_watts";
@@ -321,7 +319,7 @@ class PVSystem {
         let available_excess_power = Math.max(this.pv_excess_power + this.controllable_load_power, 0);
         this.available_excess_power_buffer.push(available_excess_power);
 
-        let available_surplus_power = Math.max(this.feedin_power - this.grid_consumption + this.controllable_load_power, 0);
+        let available_surplus_power = Math.max(this.feedin_power - this.grid_consumption + this.controllable_load_power + Math.max(this.pv_excess_power, 0), 0);
         this.available_surplus_power_buffer.push(available_surplus_power);
 
         this.pv_forecast.updateMeasurement(this.pv_power_estimate);
@@ -335,8 +333,7 @@ class PVSystem {
         setState(this.PV_CUR_WATTS_OBJ, this.pv_power, true);
         setState(this.PV_FEEDIN_LIMIT_DEVIATION_WATTS_OBJ, this.pv_feedin_limit_deviation, true);
         setState(this.PV_SELF_CONSUMPTION_WATTS_OBJ, this.self_consumption, true);
-        setState(this.PV_FEEDIN_SPREAD_WATTS_OBJ, this.pv_feedin_power_buffer.spread(), true);
-        setState(this.PV_SELF_CONSUMPTION_SPREAD_OBJ, this.self_consumption_buffer.spread(), true);
+        setState(this.PV_TOTAL_CONSUMPTION_WATTS_OBJ, this.total_consumption, true);
 
         setState(this.PV_SHADING_LOSS_WATTS_OBJ, this.pv_shading_loss, true);
         setState(this.PV_ESTIMATE_MAX_WATTS_OBJ, this.pv_max_power_estimate, true);

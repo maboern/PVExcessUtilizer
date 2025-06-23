@@ -25,12 +25,17 @@ class PVForecast {
         this.afternoon_dampening_start_hour = 10;
         this.afternoon_dampening_slope = this.afternoon_dampening / (this.afternoon_dampening_peak_hour - this.afternoon_dampening_start_hour);
 
+        this.url = "";
+        this.api_data = "";
+        this.api_data_ts = 0;
+        this.api_request_timeout = 5000;
+
         // Primary lookback buffer for per-second measurements until next update interval
         this.power_measurement_lookback = new RingBuffer(this.update_interval_ms/1000); 
         // Second aggregation of update interval average buckets to 1 hour
         this.power_measurement_bucket_loockback = new RingBuffer(60*60*1000/this.update_interval_ms);
 
-        // PV Forecast from API (Solcast / Forecast.solar)
+        // PV Forecast Adapter (Solcast / Forecast.solar)
         this.PV_FORECAST_BASE = 'pvforecast.1.summary';
         this.PV_FORECAST_POWER_NOW_OBJ = this.PV_FORECAST_BASE + '.power.now';
         this.PV_FORECAST_TODAY_HOURS_BASE_OBJ = this.PV_FORECAST_BASE + '.power.hoursToday';
@@ -40,8 +45,26 @@ class PVForecast {
 
         this.FORECAST_CUR_WATTS_OBJ = this.root_obj + ".power_now";
         createState(this.FORECAST_CUR_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentPower", type: "number", unit: "W", def: 0});
-
+        this.FORECAST_SOLCAST_API_KEY = this.root_obj + ".api_key";
+        createState(this.FORECAST_SOLCAST_API_KEY, "", {read: true, write: true, name: "Solcast API Key", type: "string", def: ""});
+        this.FORECAST_SOLCAST_SITE_ID = this.root_obj + ".site_id";
+        createState(this.FORECAST_SOLCAST_SITE_ID, "", {read: true, write: true, name: "Solcast Site ID ", type: "string", def: ""});
+        this.FORECAST_SOLCAST_DATA = this.root_obj + ".api_data";
+        createState(this.FORECAST_SOLCAST_DATA, "", {read: true, write: false, name: "Latest Forecast raw data", type: "string", def: ""});
+        
+        this.restoreState();
         console.debug("Initialized PVForecast.");
+    }
+
+    restoreState() {
+        let api_key = getState(this.FORECAST_SOLCAST_API_KEY).val;
+        let site_id = getState(this.FORECAST_SOLCAST_SITE_ID).val;
+        this.url = `https://api.solcast.com.au/rooftop_sites/${site_id}/forecasts?api_key=${api_key}&format=json`
+        setState(this.FORECAST_SOLCAST_API_KEY, api_key, true);
+        setState(this.FORECAST_SOLCAST_SITE_ID, site_id, true);
+        
+        this.api_data = getState(this.FORECAST_SOLCAST_DATA).val;
+        this.api_data_ts = getState(this.FORECAST_SOLCAST_DATA).ts;
     }
 
     getUpdateIntervalMs() { return this.update_interval_ms; }
@@ -122,6 +145,9 @@ class PVForecast {
         return corrected_forecast;
     }
 
+    getLoadCorrectedForecast(datetime) {
+        return this.getForecast(datetime) - this.base_power_reserve - this.ondemand_power_on_ratio*this.ondemand_power_reserve;
+    }
     getForecast(datetime) {
         let hour = datetime.getHours();
         let minute = datetime.getMinutes();
@@ -168,6 +194,23 @@ class PVForecast {
 
     getLastHourAverageMeasuredPower() { 
         return this.power_measurement_bucket_loockback.avg();
+    }
+
+    retrieve() {
+        httpGet(this.url, { timeout: this.api_request_timeout, responseType: 'text' },
+            (error, response) => {
+                const data = response.data;
+                const code = response.statusCode;
+                if (!error) {
+                    if(this.DEBUG) {  log("Response (" + code + "): " + data); }
+                    setState(this.FORECAST_SOLCAST_DATA, data, true);
+                    console.log("PVForecast: Updated Forecast Data from Solcast API.");
+                } else {
+                    var msg = "(" + error + ") ERROR for HTTP GET Request to: " + this.url + "(" + code + ")";
+                    log(msg, "warn");
+                }
+            }
+        );
     }
 
     process() {

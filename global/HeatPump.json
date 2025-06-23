@@ -5,27 +5,7 @@
   "verbose": false
 }
 -- do not edit previous lines - END --*/
-/*
-Strategy: Excess
-Mode: Efficient Heating, Buffering (once boiler not feasible anymore)
-EMI Setting: MaxBuffer
 
-Strategy: Surplus
-Mode: Efficient, Buffering (once required = remaining + 1h OR if excess)
-EMI Setting: MaxBuffer
-
-Strategy: Greedy
-Mode: Modulated, Buffering (if high surplus)
-EMI Setting: MaxBuffer
-
-*/
-const HEATPUMP_MODE = Object.freeze({
-    PASSIVE : "PASSIVE",     // Do not actively start the heatpump
-    EFFICIENT : "EFFICIENT",  // Lowest power possible for heatpump to be most efficient.
-    MODULATED : "MODULATED", // Modulate heatpump power to follow available solar surplus
-    BUFFERING : "BUFFERING", // Try to fill buffers as fast as possible with available surplus energy.
-    EFFICIENT_BUFFERING : "EFFICIENT BUFFERING", // Same as Buffering, but keep heatpump lower in an efficient regime
-});
 const SPECIFIC_HEAT_CAPACITY_WATER_KWH = 4.186 / 3600; // 4.186 kJ/kg·°C; 3600 kJ/kWh
 
 class HeatPump {
@@ -35,8 +15,6 @@ class HeatPump {
         this.boiler = boiler;
         this.DEBUG = false;
 
-        this.warmwater_mode = HEATPUMP_MODE.EFFICIENT;
-        this.heating_mode = HEATPUMP_MODE.EFFICIENT;
         this.warmwater_target = EFFICIENT_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp();
         this.heating_target = EFFICIENT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp();
 
@@ -50,6 +28,8 @@ class HeatPump {
         this.hk3_pump_obj = 'stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.HEIZKREISPUMPE_3';
         this.ww_output_power_kw_summer_obj = 'stiebel-isg.0.settings.WARMWASSER.WW LEISTUNG WP.val1126';
         this.ww_output_power_kw_winter_obj = 'stiebel-isg.0.settings.WARMWASSER.WW LEISTUNG WP.val1127';
+        this.ww_eco_temp_obj = 'stiebel-isg.0.settings.WARMWASSER.WARMWASSERTEMPERATUREN.val11019';
+        this.ww_hysteresis_obj = 'stiebel-isg.0.settings.WARMWASSER.GRUNDEINSTELLUNG.val120';
 
         this.required_boiler_runtime = 0;
         this.required_warmwater_runtime = 0;
@@ -68,10 +48,11 @@ class HeatPump {
         this.EFFICIENCY_FACTOR = this.root_obj + ".efficiency";
         createState(this.EFFICIENCY_FACTOR, 1, {read: true, write: false, name: "Heatpump Efficency Factor", type: "number", def: 1});
 
-
         this.updateState();
     }  
     
+    getWarmWaterEcoTemp() { return getStateIfExisting(this.ww_eco_temp_obj, 42.5);}
+    getWarmWaterHysteresis() { return getStateIfExisting(this.ww_hysteresis_obj, 6);}
     getWarmWaterTarget() { return this.warmwater_target; }
     setWarmWaterTarget(temp, reason) {
         if(temp != this.warmwater_target) {
@@ -82,7 +63,6 @@ class HeatPump {
         }
         this.updateState();
     }
-    resetWarmWaterTarget() { this.warmwater_target = this.getDefaultTargetSettings(this.warmwater_mode).getWarmWaterTemp(); }
 
     getHeatingTarget() { return this.heating_target; }
     setHeatingTarget(temp, reason) {
@@ -94,40 +74,6 @@ class HeatPump {
         }
         this.updateState();
     }
-    resetHeatingTarget() { this.heating_target = this.getDefaultTargetSettings(this.heating_mode).getHeatingBufferTemp(); }
-
-    setMode(new_mode, reason) {
-        this.setWarmWaterMode(new_mode, reason);
-        this.setHeatingMode(new_mode, reason);
-    }
-
-    setWarmWaterMode(new_mode, reason) {
-        if(new_mode != this.warmwater_mode) {
-            this.warmwater_mode = new_mode;
-            this.resetWarmWaterTarget();
-            let reason_suffix = '.';
-            if(reason) { reason_suffix = " because of " + reason + "."; }
-            console.log("Changing Heatpump WarmWater mode to " + new_mode + reason_suffix);
-        }
-        this.updateState();
-    }
-    getWarmWaterMode() { return this.warmwater_mode; }
-
-    setHeatingMode(new_mode, reason) {
-        if(new_mode != this.heating_mode) {
-            this.heating_mode = new_mode;
-            this.resetHeatingTarget();
-            let reason_suffix = '.';
-            if(reason) { reason_suffix = " because of " + reason + "."; }
-            if(!this.isInSummerMode()) {
-                console.log("Changing Heatpump Heating mode to " + new_mode + reason_suffix);
-            }
-        }
-        this.updateState();
-    }
-    getHeatingMode() { return this.heating_mode; }
-
-
     isInSummerMode() {
         return getStateIfExisting(this.summer_mode_obj, false);
     }
@@ -271,12 +217,10 @@ class HeatPump {
     getRequiredHeatingRunTimeToMaxBuffer() { return this.estimateHeatingRunMinsRequired(MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp()); }
     getExpectedWarmWaterPower() { return this.warmwater_expected_power; }
     getExpectedHeatingPower() { return this.heating_expected_power; }
+    getMinHeatingPower() { return this.semp_client.getHeatingMinPower(); }
     getExpectedBoilerPower() { return this.boiler.getExpectedPower(); }
-    getMinExpectedPower() { return this.isInSummerMode() ? this.getExpectedWarmWaterPower() : 
-                            Math.min(this.getExpectedWarmWaterPower(), this.getExpectedHeatingPower()); }
-
     getCurrentPower() { return this.semp_client.getHeatingPower() + this.semp_client.getWarmWaterPower(); }
-
+    getWarmWaterTemp() {return this.boiler.getTemperature(); }
     hasReachedWarmWaterTemp() { return this.boiler.getTemperature() >= this.getWarmWaterTarget(); }
     hasReachedMaxBufferWarmWaterTemp() { return this.boiler.getTemperature() >= MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp(); }
     hasReachedHeatingBufferTemp() { return this.getHeatingBufferTemp() >= this.getHeatingTarget(); }
@@ -370,22 +314,6 @@ class HeatPump {
     controlMaxBufferingHeating(min_available_power, max_available_power) {
         let recommended_power = Math.min(min_available_power, 3500);
         this.controlHeating(min_available_power, max_available_power, recommended_power);
-    }
-
-    getDefaultTargetSettings(mode) {
-        switch(mode) {
-            case HEATPUMP_MODE.EFFICIENT:
-                return EFFICIENT_HEATPUMP_EMI_SETTINGS;
-            case HEATPUMP_MODE.EFFICIENT_BUFFERING:
-            case HEATPUMP_MODE.PASSIVE:
-                return DEFAULT_HEATPUMP_EMI_SETTINGS;
-            case HEATPUMP_MODE.BUFFERING:
-            case HEATPUMP_MODE.MODULATED:
-                return MAX_BUFFER_HEATPUMP_EMI_SETTINGS;
-            default:
-                console.error("Unsupported HEATPUMP MODE: " + mode);
-                return DEFAULT_HEATPUMP_EMI_SETTINGS;
-        }
     }
 
     updateState() {

@@ -89,6 +89,10 @@ class HeatPumpSempClient {
         this.warmwater_on = status.Device2EM.DeviceStatus[0].Status == "On"; 
         this.warmwater_power = Number(status.Device2EM.DeviceStatus[0].PowerConsumption.PowerInfo.AveragePower);
 
+        if(!this.warmwater_controllable) {
+            this.last_warmwater_request_on = false;    
+        }
+
         if(this.status_up_to_date) {
             if(!warmwater_was_on && this.warmwater_on) {
                 console.log("Heatpump WarmWater STARTED");
@@ -105,6 +109,10 @@ class HeatPumpSempClient {
         this.heating_controllable = status.Device2EM.DeviceStatus[1].EMSignalsAccepted == "true";
         this.heating_on = status.Device2EM.DeviceStatus[1].Status == "On"; 
         this.heating_power = Number(status.Device2EM.DeviceStatus[1].PowerConsumption.PowerInfo.AveragePower);
+
+        if(!this.heating_controllable) {
+            this.last_heating_request_power = 0;    
+        }
 
         if(this.status_up_to_date) {
             if(!heating_was_on && this.heating_on) {
@@ -208,17 +216,17 @@ class HeatPumpSempClient {
                 let xml = this.createXmlRequest(this.device_id_warmwater, on, 2000);
                 if(this.DEBUG) { console.log("Request WarmWater: " + xml); }
                 this.request(xml);
-                setState(this.REQ_WARMWATER_OBJ, on, true);
                 this.last_warmwater_request_ts = Date.now();
                 this.last_warmwater_request_on = on;
+                setState(this.REQ_WARMWATER_OBJ, this.last_warmwater_request_on, true);
                 return (changed || force);
             } else {
                 if(this.DEBUG) { console.log("Warmwater request skipped because of request interval: " + this.last_warmwater_request_ts) }
             }
         } else {
             if(this.DEBUG) { console.log("Warmwater request skipped because HeatPump not controllable.");}
-            setState(this.REQ_WARMWATER_OBJ, false, true);
             this.last_warmwater_request_on = false;
+            setState(this.REQ_WARMWATER_OBJ, this.last_warmwater_request_on, true);
         }
         return false;
     }
@@ -230,17 +238,15 @@ class HeatPumpSempClient {
                 let xml = this.createXmlRequest(this.device_id_heating, power > 0, power);
                 if(this.DEBUG) { console.log("Request Heating: " + xml); }
                 this.request(xml);
-                setState(this.REQ_HEATING_POWER_OBJ, power, true);
                 this.last_heating_request_ts = Date.now();
                 this.last_heating_request_power = power;
+                setState(this.REQ_HEATING_POWER_OBJ, this.last_heating_request_power, true);
                 return (changed || force);
             } else {
                 if(this.DEBUG) { console.log("Heating request skipped because of request interval: " + this.last_heating_request_ts) }
             }
         } else {
-            if(this.DEBUG) { console.log("Heating request skipped because HeatPump not controllable.");}
-            setState(this.REQ_HEATING_POWER_OBJ, 0, true);
-            this.last_heating_request_power = 0;
+            if(this.DEBUG) { console.log("Heating request skipped because HeatPump not controllable.");}       
         }
         return false;
     }
@@ -276,7 +282,7 @@ class HeatPumpSempClient {
                 const data = response.data;
                 const code = response.statusCode;
                 if (!error) {
-                    if(this.DEBUG) { log("Reponse (" + code + "): " + response);}
+                    if(this.DEBUG) { log("Response (" + code + "): " + data);}
                     this.processStatusUpdate(data)
                 } else {
                     var msg = "(" + error + ") ERROR for HTTP GET Request to: " + this.url + "(" + code + ")";
@@ -289,8 +295,10 @@ class HeatPumpSempClient {
     writeState() {
         setState(this.WARMWATER_CONTROLLABLE_OBJ, this.warmwater_controllable, true);
         setState(this.WARMWATER_POWER_OBJ, this.warmwater_power, true);
+        setState(this.REQ_WARMWATER_OBJ, this.last_warmwater_request_on, true);
         setState(this.HEATING_CONTROLLABLE_OBJ, this.heating_controllable, true);
         setState(this.HEATING_POWER_OBJ, this.heating_power, true);
+        setState(this.REQ_HEATING_POWER_OBJ, this.last_heating_request_power, true);  
     }
 }
 
