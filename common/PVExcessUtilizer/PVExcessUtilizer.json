@@ -108,7 +108,7 @@ function calculateDisposableLoadPower() {
 }
 
 function validateRunning() {
-    let non_controlled_consumption = pv.getTotalConsumption() - pv.getControllableLoadPower();
+    let non_controlled_consumption = pv.getRecentTotalConsumptionMeasurements().tail(10).percentile(50) - pv.getControllableLoadPower();
     non_controlled_consumption_smoothed = smooth(non_controlled_consumption_smoothed, non_controlled_consumption, 0.25);
     if(non_controlled_consumption_smoothed < 0) 
     {
@@ -183,10 +183,15 @@ function updateControl() {
 }
 
 function atSunrise() {
-    heatpump_mgr.updateAtSunrise();
     pv_forecast.retrieve();
+    heatpump_mgr.updateAtSunrise();
 }
 schedule('{"time":{"exactTime":true,"start":"sunrise"},"period":{"days":1}}', atSunrise);
+
+function middayHourly() {
+    pv_forecast.retrieve();
+}
+schedule('{"time":{"start":"08:37","end":"15:50","mode":"hours","interval":1},"period":{"days":1}}', middayHourly);
 
 function hourly() {
     heatpump_mgr.updateHourly();

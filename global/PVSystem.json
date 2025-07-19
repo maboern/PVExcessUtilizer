@@ -68,12 +68,15 @@ class PVSystem {
         this.self_consumption_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.grid_consumption = 0;
         this.total_consumption = 0;
+        this.total_consumption_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.pv_excess_power = 0;
         this.pv_excess_power_buffer = new RingBuffer(this.PV_MEASUREMENT_LOOKBACK_SECS);
         this.pv_excess_power_smoothed = 0;
         this.controllable_load_power = 0;
         this.available_excess_power_buffer = new RingBuffer(this.PV_AVAILABLE_POWER_LOOKBACK_SECS);
         this.available_surplus_power_buffer = new RingBuffer(this.PV_AVAILABLE_POWER_LOOKBACK_SECS);
+        this.utilized_excess_power = 0;
+        this.utilized_surplus_power = 0;
         this.pv_shading_loss = 0;
         this.irradiance = 0;
 
@@ -101,22 +104,28 @@ class PVSystem {
         createState(this.PV_IS_CURTAILED_OBJ, false, {read: true, write: false, name: "pvIsCurtailed", type: "boolean", def: false});
         this.PV_IRRADIANCE_ESTIMATE_OBJ = this.root_obj + ".irradiance";
         createState(this.PV_IRRADIANCE_ESTIMATE_OBJ, 0, {read: true, write: false, name: "Irradiance Estimate", type: "number", unit: "W/m2", def: 0});
-        this.PV_DAY_EXCESS_ENERGY_OBJ = this.root_obj + ".day_excess_energy";
-        createState(this.PV_DAY_EXCESS_ENERGY_OBJ, 0, {read: true, write: false, name: "Excess Energy Today", type: "number", unit: "Wh", def: 0});
         this.PV_AVAILABLE_EXCESS_WATTS_OBJ = this.root_obj + ".pv_available_excess_watts";
         createState(this.PV_AVAILABLE_EXCESS_WATTS_OBJ, 0, {read: true, write: false, name: "pvAvailableExcessPower", type: "number", unit: "W", def: 0});
         this.PV_AVAILABLE_SURPLUS_WATTS_OBJ = this.root_obj + ".pv_available_surplus_watts";
         createState(this.PV_AVAILABLE_SURPLUS_WATTS_OBJ, 0, {read: true, write: false, name: "pvAvailableSurplusPower", type: "number", unit: "W", def: 0});
+        this.PV_DAY_EXCESS_ENERGY_OBJ = this.root_obj + ".day_excess_energy";
+        createState(this.PV_DAY_EXCESS_ENERGY_OBJ, 0, {read: true, write: false, name: "Excess Energy Today", type: "number", unit: "Wh", def: 0});
+        this.PV_DAY_UTIL_EXCESS_ENERGY_OBJ = this.root_obj + ".day_utilized_excess_energy";
+        createState(this.PV_DAY_UTIL_EXCESS_ENERGY_OBJ, 0, {read: true, write: false, name: "Utilized Excess Energy Today", type: "number", unit: "Wh", def: 0});
+        this.PV_DAY_UTIL_SURPLUS_ENERGY_OBJ = this.root_obj + ".day_utilized_surplus_energy";
+        createState(this.PV_DAY_UTIL_SURPLUS_ENERGY_OBJ, 0, {read: true, write: false, name: "Utilized Surplus Energy Today", type: "number", unit: "Wh", def: 0});
+        this.PV_DAY_UTIL_GRID_ENERGY_OBJ = this.root_obj + ".day_utilized_grid_energy";
+        createState(this.PV_DAY_UTIL_GRID_ENERGY_OBJ, 0, {read: true, write: false, name: "Utilized Grid Energy Today", type: "number", unit: "Wh", def: 0});
         
         this.restoreState();
         console.log(`Initialized PV System ${this.name} (${this.PV_PEAK_POWER_WATTS} Wp).`)
     }
     
     restoreState() {
-        var state = getState(this.PV_DAY_EXCESS_ENERGY_OBJ);
-        if(state) {
-            this.day_excess_energy = state.val;
-        }
+        this.day_excess_energy = getStateIfExisting(this.PV_DAY_EXCESS_ENERGY_OBJ, 0);
+        this.day_utilized_excess_energy = getStateIfExisting(this.PV_DAY_UTIL_EXCESS_ENERGY_OBJ, 0);
+        this.day_utilized_surplus_energy = getStateIfExisting(this.PV_DAY_UTIL_SURPLUS_ENERGY_OBJ, 0);
+        this.day_utilized_grid_energy = getStateIfExisting(this.PV_DAY_UTIL_GRID_ENERGY_OBJ, 0);
     }
 
     getUpdateIntervalMs() { return this.updateIntervalMs; }
@@ -127,6 +136,7 @@ class PVSystem {
     getRecentSelfConsumptionMeasurements() { return this.self_consumption_buffer; }
 
     getTotalConsumption() { return this.total_consumption; }
+    getRecentTotalConsumptionMeasurements() { return this.total_consumption_buffer; }
     getGridConsumption() { return this.grid_consumption; }
     
     getExcessPower() { return this.pv_excess_power; }
@@ -167,6 +177,9 @@ class PVSystem {
 
     resetDayValues() {
         this.day_excess_energy = 0;
+        this.day_utilized_grid_energy = 0;
+        this.day_utilized_surplus_energy = 0;
+        this.day_utilized_excess_energy = 0;
     }
 
     restartMeasurementPeriod() {
@@ -221,7 +234,7 @@ class PVSystem {
         this.updateShadingLossEstimate();
         this.fadeGenerationMax();
 
-        var forecast = this.pv_forecast.now();
+        var forecast = this.pv_forecast.now().getUpper();
         forecast -= this.pv_shading_loss;
         this.pv_max_power_estimate = forecast;
         if(this.isCurtailed()) {
@@ -311,6 +324,7 @@ class PVSystem {
 
         this.grid_consumption = getState(this.PV_GRID_CONSUMPTION_OBJ).val;
         this.total_consumption = this.self_consumption + this.grid_consumption;
+        this.total_consumption_buffer.push(this.total_consumption);
 
         this.updateIrradianceEstimate();
         this.mppt.process(this.irradiance);
@@ -318,9 +332,17 @@ class PVSystem {
 
         let available_excess_power = Math.max(this.pv_excess_power + this.controllable_load_power, 0);
         this.available_excess_power_buffer.push(available_excess_power);
+        this.utilized_excess_power = Math.min(this.controllable_load_power, available_excess_power);
 
         let available_surplus_power = Math.max(this.feedin_power - this.grid_consumption + this.controllable_load_power + Math.max(this.pv_excess_power, 0), 0);
         this.available_surplus_power_buffer.push(available_surplus_power);
+        let non_controlled_consumption = this.total_consumption - this.controllable_load_power;
+        this.utilized_surplus_power = Math.max(this.self_consumption - non_controlled_consumption - this.utilized_excess_power, 0);
+
+        this.day_utilized_excess_energy += this.utilized_excess_power * this.getUpdateIntervalMs() / (1000*60*60);
+        this.day_utilized_surplus_energy += this.utilized_surplus_power * this.getUpdateIntervalMs() / (1000*60*60);
+        this.utilized_grid_power = Math.min(this.grid_consumption, this.controllable_load_power);
+        this.day_utilized_grid_energy += this.utilized_grid_power * this.getUpdateIntervalMs() / (1000*60*60);;
 
         this.pv_forecast.updateMeasurement(this.pv_power_estimate);
         if(Math.floor(Date.now()/1000) % 5 == 0) { //TODO
@@ -342,6 +364,9 @@ class PVSystem {
 
         setState(this.PV_IS_CURTAILED_OBJ, this.isCurtailed(), true);
         setState(this.PV_DAY_EXCESS_ENERGY_OBJ, this.day_excess_energy, true);
+        setState(this.PV_DAY_UTIL_EXCESS_ENERGY_OBJ, this.day_utilized_excess_energy, true);
+        setState(this.PV_DAY_UTIL_SURPLUS_ENERGY_OBJ, this.day_utilized_surplus_energy, true);
+        setState(this.PV_DAY_UTIL_GRID_ENERGY_OBJ, this.day_utilized_grid_energy, true);
 
         setState(this.PV_AVAILABLE_EXCESS_WATTS_OBJ, this.available_excess_power_buffer.last(), true);
         setState(this.PV_AVAILABLE_SURPLUS_WATTS_OBJ, this.available_surplus_power_buffer.last(), true);

@@ -202,7 +202,7 @@ class HeatPump {
 
     isWarmWaterAllowedToStart() {  return (this.required_warmwater_runtime >= this.min_heatpump_runtime_mins); }
     isWarmWaterAllowedToStop() { 
-        let min_runtime_elapsed = isNowInTimePeriod(this.semp_client.getWarmWaterStartTimeStamp(), this.min_heatpump_runtime_mins);
+        let min_runtime_elapsed = !isNowInTimePeriod(this.semp_client.getWarmWaterStartTimeStamp(), this.min_heatpump_runtime_mins*60*1000);
         return this.isWarmWaterOn() && this.semp_client.isWarmWaterControllable() && min_runtime_elapsed; }
     isWarmWaterOn() { return this.semp_client.isWarmWaterOn(); }
 

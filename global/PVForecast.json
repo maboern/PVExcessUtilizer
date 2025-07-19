@@ -19,32 +19,26 @@ class PVForecast {
         this.excess_power_threshold = this.feedin_limit_power + this.base_power_reserve; 
         this.surplus_power_threshold = this.base_power_reserve; 
 
-        // General Reduction of forecast at 17:00, starting from 10:00
-        this.afternoon_dampening = 0.0; 
-        this.afternoon_dampening_peak_hour = 17;
-        this.afternoon_dampening_start_hour = 10;
-        this.afternoon_dampening_slope = this.afternoon_dampening / (this.afternoon_dampening_peak_hour - this.afternoon_dampening_start_hour);
-
         this.url = "";
         this.api_data = "";
         this.api_data_ts = 0;
-        this.api_request_timeout = 5000;
+        this.api_request_timeout = 30000;
+        this.forecast = new Map();
+
+        this.cur_forecast = undefined;
+        this.peak_time = undefined; 
 
         // Primary lookback buffer for per-second measurements until next update interval
         this.power_measurement_lookback = new RingBuffer(this.update_interval_ms/1000); 
         // Second aggregation of update interval average buckets to 1 hour
         this.power_measurement_bucket_loockback = new RingBuffer(60*60*1000/this.update_interval_ms);
 
-        // PV Forecast Adapter (Solcast / Forecast.solar)
-        this.PV_FORECAST_BASE = 'pvforecast.1.summary';
-        this.PV_FORECAST_POWER_NOW_OBJ = this.PV_FORECAST_BASE + '.power.now';
-        this.PV_FORECAST_TODAY_HOURS_BASE_OBJ = this.PV_FORECAST_BASE + '.power.hoursToday';
-        
-        this.cur_forecast = this.getForecast(new Date());
-        this.day_excess_minutes_remaining = 0;
-
         this.FORECAST_CUR_WATTS_OBJ = this.root_obj + ".power_now";
         createState(this.FORECAST_CUR_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentPower", type: "number", unit: "W", def: 0});
+        this.FORECAST_CUR_MIN_WATTS_OBJ = this.root_obj + ".min_power_now";
+        createState(this.FORECAST_CUR_MIN_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentMinPower", type: "number", unit: "W", def: 0});
+        this.FORECAST_CUR_MAX_WATTS_OBJ = this.root_obj + ".max_power_now";
+        createState(this.FORECAST_CUR_MAX_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentMaxPower", type: "number", unit: "W", def: 0});
         this.FORECAST_SOLCAST_API_KEY = this.root_obj + ".api_key";
         createState(this.FORECAST_SOLCAST_API_KEY, "", {read: true, write: true, name: "Solcast API Key", type: "string", def: ""});
         this.FORECAST_SOLCAST_SITE_ID = this.root_obj + ".site_id";
@@ -53,18 +47,22 @@ class PVForecast {
         createState(this.FORECAST_SOLCAST_DATA, "", {read: true, write: false, name: "Latest Forecast raw data", type: "string", def: ""});
         
         this.restoreState();
-        console.debug("Initialized PVForecast.");
+
+        console.log("Initialized PVForecast.");
     }
 
     restoreState() {
         let api_key = getState(this.FORECAST_SOLCAST_API_KEY).val;
         let site_id = getState(this.FORECAST_SOLCAST_SITE_ID).val;
-        this.url = `https://api.solcast.com.au/rooftop_sites/${site_id}/forecasts?api_key=${api_key}&format=json`
+        this.url = `https://api.solcast.com.au/rooftop_sites/${site_id}/forecasts?api_key=${api_key}&format=json`;
         setState(this.FORECAST_SOLCAST_API_KEY, api_key, true);
         setState(this.FORECAST_SOLCAST_SITE_ID, site_id, true);
         
         this.api_data = getState(this.FORECAST_SOLCAST_DATA).val;
         this.api_data_ts = getState(this.FORECAST_SOLCAST_DATA).ts;
+
+        this.restoreFromHistory();
+        this.parseApiData(this.api_data);
     }
 
     getUpdateIntervalMs() { return this.update_interval_ms; }
@@ -101,6 +99,7 @@ class PVForecast {
         return total_extra_minutes;
     }
 
+    getPeakTime() { if(this.peak_time === undefined) {this.findPeakTime();} return this.peak_time; }
     getPeakPower(peak_time) { return this.getForecast(peak_time); }
     findPeakTime() {
         var datetime = new Date();
@@ -116,70 +115,40 @@ class PVForecast {
             }
             datetime = addMinutes(datetime, STEP_SIZE_MINUTES);
         }
+        this.peak_time = peak_time;
 
         console.log("Forecasting " + Math.round(peak_power) + "W peak at " + peak_time.toTimeString() + "today.");
         return peak_time;
     }
 
-    loadSampleTimeForecast(sample_time) {
-        var obj = this.PV_FORECAST_TODAY_HOURS_BASE_OBJ + "." + sample_time;
-        return getState(obj).val;
-    }
-
-    toSampleTime(hour, half_hour) {
-        let padded_hour = ('0' + hour).slice(-2);
-        let padded_half_hours = ('0' + half_hour).slice(-2);
-        return padded_hour + ":" + padded_half_hours + ":00";
-    }
-
-    applyForecastDampening(forecast, hour, minute) {
-        let fractional_hour = hour + (minute / 60);
-
-        var corrected_forecast = forecast;
-        if(fractional_hour > this.afternoon_dampening_start_hour) {
-            let peak_distance = Math.abs(this.afternoon_dampening_peak_hour - fractional_hour);
-            let dampening = this.afternoon_dampening - (peak_distance * this.afternoon_dampening_slope);
-            corrected_forecast = forecast * (1 - dampening);
-        }
-
-        return corrected_forecast;
-    }
-
     getLoadCorrectedForecast(datetime) {
         return this.getForecast(datetime) - this.base_power_reserve - this.ondemand_power_on_ratio*this.ondemand_power_reserve;
     }
-    getForecast(datetime) {
+
+    getForecast(datetime) { return this.getForecastRange(datetime).getEstimate(); }
+    getForecastRange(datetime) {
         let hour = datetime.getHours();
-        let minute = datetime.getMinutes();
         if(hour < 5 || hour >= 21) {
             // No solar power outside of forecast hours
-            return 0;
+            return new PVForecastRange(datetime.getTime(), 0, 0, 0);
         }
 
-        // Assuming half-hour values
-        let prev_hour = hour;
-        let prev_half_hours = Math.floor(minute / 30) * 30;
+        // Assuming half-hour periods at 15 or 45 minutes offset
+        let prev_period_timestamp = roundMinutesDownToHalfHoursAtQuarterOffset(datetime).getTime();
+        let prev_forecast_value = this.forecast.get(prev_period_timestamp);
+        let next_forecast_value = this.forecast.get(prev_period_timestamp + 30*60*1000);
 
-        let next_hour = hour;
-        let next_half_hours = Math.ceil(minute / 30) * 30;
-        if(next_half_hours == 60) {
-            next_hour = next_hour + 1;
-            next_half_hours = 0;
+        if(prev_forecast_value === undefined || next_forecast_value === undefined) {
+            console.warn("Undefined forecast for time " + datetime + " (" + prev_period_timestamp + ")! " + prev_forecast_value + "/" + next_forecast_value);
+            return new PVForecastRange(datetime.getTime(), -1, -1, -1);
         }
-        
-        let prev_sample_time = this.toSampleTime(prev_hour, prev_half_hours);
-        let prev_forecast = this.loadSampleTimeForecast(prev_sample_time);
-        let next_sample_time = this.toSampleTime(next_hour, next_half_hours);
-        let next_forecast = this.loadSampleTimeForecast(next_sample_time);
 
         // Linear Interpolation between prev and next sample
-        let fraction = (minute % 30) / 30;
-        let interpolated_forecast = prev_forecast * (1-fraction) + next_forecast * fraction;
-
-        return this.applyForecastDampening(interpolated_forecast, hour, minute);
+        return PVForecastRange.interpolate(prev_forecast_value, next_forecast_value, datetime.getTime());
     }
 
     now() {
+        if(this.cur_forecast === undefined) { this.cur_forecast = this.getForecastRange(new Date()); }
         return this.cur_forecast;
     }
 
@@ -196,6 +165,26 @@ class PVForecast {
         return this.power_measurement_bucket_loockback.avg();
     }
 
+    parseApiData(json) {
+        let data = JSON.parse(json);
+        let forecasts = data.forecasts;
+
+        for(var i=0; i<forecasts.length; i++) {
+            let forecast = forecasts[i];
+
+            if(forecast.period != "PT30M") {console.warn("Forecast Period does not match expected PT30M: " + forecast);}
+            let timestamp = Date.parse(forecast.period_end) - 15*60*1000; // 15 Minutes offset to get to middle of period
+            let estimate = Number(forecast.pv_estimate)*1000;
+            let lower = Number(forecast.pv_estimate10)*1000;
+            let upper = Number(forecast.pv_estimate90)*1000;
+
+            let forecast_range = new PVForecastRange(timestamp, estimate, lower, upper);
+            this.forecast.set(timestamp, forecast_range);
+        }
+
+        this.historize();
+    }
+
     retrieve() {
         httpGet(this.url, { timeout: this.api_request_timeout, responseType: 'text' },
             (error, response) => {
@@ -204,6 +193,9 @@ class PVForecast {
                 if (!error) {
                     if(this.DEBUG) {  log("Response (" + code + "): " + data); }
                     setState(this.FORECAST_SOLCAST_DATA, data, true);
+                    this.api_data = data;
+                    this.api_data_ts = Date.now();
+                    this.parseApiData(data);
                     console.log("PVForecast: Updated Forecast Data from Solcast API.");
                 } else {
                     var msg = "(" + error + ") ERROR for HTTP GET Request to: " + this.url + "(" + code + ")";
@@ -217,14 +209,120 @@ class PVForecast {
         this.aggregateMeasurements();
 
         let now = new Date();
-        this.cur_forecast = this.getForecast(now);
-
-        this.day_excess_minutes_remaining = this.estimateRemainingExcessToday(this.default_load_power);
-
-        this.writeState();
+        this.cur_forecast = this.getForecastRange(now);
     }
 
-    writeState() {
-        setState(this.FORECAST_CUR_WATTS_OBJ, this.cur_forecast, true);
+    historize() {
+        this.forecast.forEach((value) => sendTo('influxdb.0', 'storeState', {
+            id: this.FORECAST_CUR_WATTS_OBJ,
+            state: {
+                ts: value.getTimestamp(),
+                val: value.getEstimate(),
+                ack: true,
+                from: this.root_obj
+            }
+        }));
+        this.forecast.forEach((value) => sendTo('influxdb.0', 'storeState', {
+            id: this.FORECAST_CUR_MIN_WATTS_OBJ,
+            state: {
+                ts: value.getTimestamp(),
+                val: value.getLower(),
+                ack: true,
+                from: this.root_obj
+            }
+        }));
+        this.forecast.forEach((value) => sendTo('influxdb.0', 'storeState', {
+            id: this.FORECAST_CUR_MAX_WATTS_OBJ,
+            state: {
+                ts: value.getTimestamp(),
+                val: value.getUpper(),
+                ack: true,
+                from: this.root_obj
+            }
+        }));
+    }
+
+    getOrCreateForecastRange(timestamp) {
+        if(!this.forecast.has(timestamp)) {
+            let forecast = new PVForecastRange(timestamp, 0, 0, 0);
+            this.forecast.set(timestamp, forecast);
+        }
+        return this.forecast.get(timestamp);
+    }
+    restoreFromHistory() {
+        var startOfDay = new Date();  
+        startOfDay.setHours(0); startOfDay.setMinutes(0); startOfDay.setSeconds(0); startOfDay.setMilliseconds(0);
+
+        sendTo('influxdb.0', 'getHistory', { 
+            id: this.FORECAST_CUR_WATTS_OBJ,
+            options: {
+                start:      startOfDay.getTime(),
+                end:        startOfDay.getTime() + 24*60*60*1000, // end of day
+                aggregate: 'onchange'
+            }
+        }, result => {
+            for (var i = 0; i < result.result.length; i++) {
+                this.getOrCreateForecastRange(result.result[i].ts).setEstimate(result.result[i].val);
+            }
+        });
+
+        sendTo('influxdb.0', 'getHistory', { 
+            id: this.FORECAST_CUR_MIN_WATTS_OBJ,
+            options: {
+                start:      startOfDay.getTime(),
+                end:        startOfDay.getTime() + 24*60*60*1000, // end of day
+                aggregate: 'onchange'
+            }
+        }, result => {
+            for (var i = 0; i < result.result.length; i++) {
+                this.getOrCreateForecastRange(result.result[i].ts).setLower(result.result[i].val);
+            }
+        });
+
+        sendTo('influxdb.0', 'getHistory', { 
+            id: this.FORECAST_CUR_MAX_WATTS_OBJ,
+            options: {
+                start:      startOfDay.getTime(),
+                end:        startOfDay.getTime() + 24*60*60*1000, // end of day
+                aggregate: 'onchange'
+            }
+        }, result => {
+            for (var i = 0; i < result.result.length; i++) {
+                this.getOrCreateForecastRange(result.result[i].ts).setUpper(result.result[i].val);
+            }
+        });
     }
 }
+
+/*
+https://api.solcast.com.au/rooftop_sites/e0bb-b70a-a8ac-d2f7/forecasts?format=json
+=> 
+{
+  "forecasts": [
+    {
+      "pv_estimate": 6.4192,
+      "pv_estimate10": 4.5637,
+      "pv_estimate90": 6.74016,
+      "period_end": "2025-05-22T16:00:00.0000000Z",
+      "period": "PT30M"
+    },
+    {
+      "pv_estimate": 4.2924,
+      "pv_estimate10": 1.9654,
+      "pv_estimate90": 4.50702,
+      "period_end": "2025-05-22T16:30:00.0000000Z",
+      "period": "PT30M"
+    },
+    ....
+    ....
+    {
+      "pv_estimate": 4.8604,
+      "pv_estimate10": 2.4711,
+      "pv_estimate90": 5.10342,
+      "period_end": "2025-05-24T16:00:00.0000000Z",
+      "period": "PT30M"
+    }
+  ]
+}
+*/
+

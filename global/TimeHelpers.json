@@ -28,3 +28,31 @@ function isNowInTimePeriod(start_ts, length) {
     let now = Date.now();
     return (now > start_ts && now < start_ts + length);
 }
+
+function roundMinutesDownToHalfHours(date) {
+    let prev_hour = date.getHours();
+    let prev_half_hours = Math.floor(date.getMinutes() / 30) * 30;
+    var prev_period_start = new Date(date.getTime());
+    prev_period_start.setHours(prev_hour);
+    prev_period_start.setMinutes(prev_half_hours);
+    prev_period_start.setSeconds(0);
+    prev_period_start.setMilliseconds(0);
+    return prev_period_start;
+}
+
+function roundMinutesDownToHalfHoursAtQuarterOffset(date) {
+    let minutes = date.getMinutes();
+    let prev_period_minute_offset;
+    if(minutes < 15) {
+        prev_period_minute_offset = -15;
+    } else if(minutes < 45) {
+        prev_period_minute_offset = 15;
+    } else {
+        prev_period_minute_offset = 45;
+    }
+    var prev_period_start = new Date(date.getTime());
+    prev_period_start.setMinutes(0);
+    prev_period_start.setSeconds(0);
+    prev_period_start.setMilliseconds(0);
+    return addMinutes(prev_period_start, prev_period_minute_offset);
+}

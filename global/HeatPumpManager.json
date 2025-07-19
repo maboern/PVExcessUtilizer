@@ -208,7 +208,7 @@ class HeatPumpManager {
         const MAX_GRIDPOWER_FRACTION = 0.75;  // We want at least 25% surplus for buffering
         let max_boost_watts = this.heatpump.getExpectedWarmWaterPower() * MAX_GRIDPOWER_FRACTION; 
 
-        let peak_time = this.pv_forecast.findPeakTime(); 
+        let peak_time = this.pv_forecast.getPeakTime(); 
         let time_since_peak_secs = (Date.now() - peak_time)/1000;
         let pv_power_remaining_secs = this.pv_forecast.estimateRemainingSurplusToday(0)*60;
         if(time_since_peak_secs > 0) {
@@ -286,14 +286,14 @@ class HeatPumpManager {
         let can_continue = max_power >= this.heatpump.getExpectedWarmWaterPower();
         return is_on && can_continue;
     }
-    doContinueWarmWaterBuffering(max_power) {
+    mayContinueWarmWaterBuffering(max_power) {
         // In order to minimize the number of compressor starts in summer, keep the heatpump
         // filling the warm water buffer while have surplus power.
-        return this.heatpump.isInSummerMode() && // TODO: Also keep running if heating does not want/need to run in winter.
-            this.canContinueWarmWaterBuffering(max_power);
+        return this.heatpump.isWarmWaterOn() &&
+            this.heatpump.isInSummerMode(); // TODO: Also keep running if heating does not want/need to run in winter.
     }
     doStartLowTempWarmWaterBuffering() {
-        const WW_HYSTERESIS_FUDGE = 0.5;
+        const WW_HYSTERESIS_FUDGE = 1.5;
         let low_temp_threshold = this.heatpump.getWarmWaterEcoTemp() - this.heatpump.getWarmWaterHysteresis() + WW_HYSTERESIS_FUDGE;
         return this.heatpump.getWarmWaterTemp() <= low_temp_threshold;
     }
@@ -315,7 +315,7 @@ class HeatPumpManager {
         } else if(this.doStartLowTempWarmWaterBuffering()) {
             this.setWarmWaterMode(HEATPUMP_MODE.BUFFERING, "low Temperature Buffering");
             this.heatpump.controlWarmWater(min_surplus_power, max_surplus_power);
-        } else if(this.doContinueWarmWaterBuffering(max_surplus_power)) {
+        } else if(this.mayContinueWarmWaterBuffering(max_surplus_power)) {
             // Keep heatpump running if already started
             this.setWarmWaterMode(HEATPUMP_MODE.BUFFERING, "WarmWater already running");
             this.heatpump.controlWarmWater(min_surplus_power, max_surplus_power);
@@ -337,7 +337,7 @@ class HeatPumpManager {
         let max_surplus_power = Math.max(surplus.tail(2*60).percentile(80), min_surplus_power);
         if(this.isWarmWaterBufferingComplete()) {
             this.setWarmWaterMode(HEATPUMP_MODE.PASSIVE, "warmwater buffering complete");
-        } else if(this.doContinueWarmWaterBuffering(max_surplus_power)) {
+        } else if(this.mayContinueWarmWaterBuffering(max_surplus_power)) {
             // To avoid unnecessary heatpump starts, do not stop  and once there is no more excess 
             // eat into surplus. Never start the heatpump
             this.setWarmWaterMode(HEATPUMP_MODE.BUFFERING, "WarmWater already running");

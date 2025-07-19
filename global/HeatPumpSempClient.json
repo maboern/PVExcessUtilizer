@@ -8,6 +8,7 @@
 // Basic client to read and control SMA Simple Energy Management Protocol (SEMP)
 // of an Stiebel Eltron heatpump via ISG Web 
 const xml2json = require('xml2json');
+
 class HeatPumpSempClient {
     constructor(root_obj) {
         this.root_obj = root_obj + ".semp";

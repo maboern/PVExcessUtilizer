@@ -1,0 +1,37 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+class PVForecastRange {
+    constructor(timestamp, estimate, lower, upper) {
+        this.timestamp = timestamp;
+        this.estimate = estimate;
+        this.lower = lower;
+        this.upper = upper;
+    }
+
+    getTimestamp() { return this.timestamp; }
+    getEstimate() { return this.estimate; }
+    setEstimate(val) { this.estimate = val; }
+    get() { return this.getEstimate(); }
+    getLower() { return this.lower; }
+    setLower(val) { this.lower = val; }
+    getUpper() { return this.upper; }
+    setUpper(val) { this.upper = val; }
+
+    static resample(prev_sample, next_sample, fraction) {
+        let estimate = next_sample.getEstimate() * fraction + prev_sample.getEstimate() * (1 - fraction);
+        let lower = next_sample.getLower() * fraction + prev_sample.getLower() * (1 - fraction);
+        let upper = next_sample.getUpper() * fraction + prev_sample.getUpper() * (1 - fraction);
+        let timestamp = next_sample.getTimestamp() * fraction + prev_sample.getTimestamp() * (1 - fraction);
+        return new PVForecastRange(timestamp, estimate, lower, upper);
+    }
+    static interpolate(prev_sample, next_sample, timestamp) {
+        let period = next_sample.getTimestamp() - prev_sample.getTimestamp();
+        let fraction = (timestamp - prev_sample.getTimestamp()) / period;
+        return this.resample(prev_sample, next_sample, fraction);
+    }
+}
