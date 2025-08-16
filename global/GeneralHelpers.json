@@ -24,3 +24,69 @@ function getStateIfExistingWithMaxAge(obj, max_age_s, fallback_value) {
     log("Unable to get state " + obj + " - returning fallback value: " + fallback_value, 'silly');
     return fallback_value;
 }
+
+/**
+ * Accumulates increments on a daily statistics object with 
+ * reset to 0 at midnight.
+ */
+function updateDailyStat(obj, increment) {
+    let state = getState(obj);
+    let last_timestamp = state.ts;
+    let value = state.val;
+    if(!isToday(last_timestamp)) {
+        value = 0;
+    }
+    value += increment;
+    setState(obj, value, true);
+    historizeDailyStatValue(obj, value);
+    return value;
+}
+
+/**
+ * Accumulates power on a daily statistics object with 
+ * reset to 0 at midnight to a Watthours value
+ */
+function accumulateDailyEnergyStat(obj, power) {
+    let state = getState(obj);
+    let last_timestamp = state.ts;
+    let value = state.val;
+    if(!isToday(last_timestamp)) {
+        value = 0;
+        last_timestamp = Date.now();
+    }
+    let time = Date.now() - last_timestamp;
+    value += (power * time) / (60*60*1000);
+    setState(obj, value, true);
+    historizeDailyStatValue(obj, value);
+    return value;
+}
+
+/**
+ * Accumulates power stored on a 1s-sample value RingBuffer object
+ * on a daily statistics object with 
+ * reset to 0 at midnight to a Watthours value. To reduce unnecessary
+ * state updates, writes only once the RingBuffer object is full and
+ * each time it wraps again thereafter.
+ */
+function accumulateDailyEnergyStatBuffered(obj, power_buffer) {
+    if(power_buffer.hasJustWrapped()) {
+        let energy = power_buffer.sum() / (60*60);
+        return updateDailyStat(obj, energy);
+    }
+    return getStateIfExisting(obj);
+}
+
+
+function historizeDailyStatValue(obj, value) {
+    let midday = new Date().setHours(12, 0, 0, 0);
+    sendTo('influxdb.0', 'storeState', {
+            id: obj,
+            state: {
+                ts: midday,
+                val: value,
+                ack: true,
+                from: 'javascript daily stat'
+            }
+        }
+    );
+}

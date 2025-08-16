@@ -46,6 +46,10 @@ class RingBuffer {
         this.count += 1;
     }
 
+    hasJustWrapped() {
+        return ((this.count > 0) && (this.count % this.length == 0));
+    }
+
     set(array) {
         if(array.length <= this.length) {
             this.buffer = array.slice();

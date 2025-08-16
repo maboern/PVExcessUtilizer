@@ -28,7 +28,6 @@ class ControllableLoad {
         this.last_started_at = 0;
         this.runtime_secs = 0;
         this.max_day_runtime_secs = 12*60*60;
-        this.day_energy = 0;
         this.non_load_consumption_buf = new RingBuffer(60);
         this.self_shutoff_at = 0;
         this.min_break_after_self_shutoff_secs = 45*60; 
@@ -56,7 +55,6 @@ class ControllableLoad {
 
     restoreState() {
         this.day_runtime_secs = getState(this.day_runtime_secs_obj).val;
-        this.day_energy = getState(this.day_energy_obj).val;
         this.max_day_runtime_secs = getState(this.max_day_runtime_mins_obj).val*60;
     }
 
@@ -73,37 +71,35 @@ class ControllableLoad {
         return this.is_ready;
     }
 
-    updateEnergyConsumption(interval) {
+    updateTotalEnergyConsumption(interval) {
         var interval_energy_Wh = interval * this.getCurrentPower() / 3600;
-        
-        this.day_energy += interval_energy_Wh;
-        setState(this.day_energy_obj, this.day_energy, true);
-        
+                
         var total_energy = getState(this.total_energy_obj).val;
         total_energy += interval_energy_Wh;
         setState(this.total_energy_obj, total_energy, true);
     }
 
     updateRunTime(interval) {
+        this.runtime_secs += interval;
+
         this.day_runtime_secs += interval;
         setState(this.day_runtime_secs_obj, this.day_runtime_secs, true);
 
-        this.runtime_secs += interval;
-        this.updateEnergyConsumption(interval);
+        this.updateTotalEnergyConsumption(interval);
     }
 
-    resetDayValues() { 
-        this.day_energy = 0;
-        setState(this.day_energy_obj, this.day_energy, true);
-        this.day_runtime_secs = 0;
-        setState(this.day_runtime_secs_obj, this.day_runtime_secs, true);
-        this.self_shutoff_at = 0;
-        this.runtime_secs = 0;
+    resetDayValuesOnDateChange() { 
+        if(!isToday(getState(this.day_runtime_secs_obj).ts)) {
+            this.day_runtime_secs = 0;
+            setState(this.day_runtime_secs_obj, this.day_runtime_secs, true);
+            this.self_shutoff_at = 0;
+            this.runtime_secs = 0;
+        }
     }
 
     start(available_power) {
         if(this.allowedToRun()) {
-            console.log("Turning ON Load " + this.name + ". (Available Power: " + available_power + "W)");
+            console.log("Turning ON Load " + this.name + ". (Available Power: " + Math.round(available_power) + "W)");
             setState(this.switch_obj, true);
 
             var switchCount = getState(this.total_switch_count_obj).val;
@@ -237,6 +233,8 @@ class ControllableLoad {
     }
 
     control(interval, min_available_power, max_available_power) {
+        this.resetDayValuesOnDateChange();
+        accumulateDailyEnergyStat(this.day_energy_obj,  this.getCurrentPower());
         this.checkMaxRuntimeUpdated();
         if(!this.isReady()) {
             return false;
@@ -245,7 +243,7 @@ class ControllableLoad {
         if(this.isOn()) {
             if(this.hasRunForMinimumTime()) {
                 if(max_available_power < this.getCurrentPower() - this.load_hysteresis_power_off){
-                    this.reason_for_stopping = "LOW AVAILABLE POWER: " + max_available_power + "W";
+                    this.reason_for_stopping = "LOW AVAILABLE POWER: " + Math.round(max_available_power) + "W";
                     this.stop();
                 }
             }

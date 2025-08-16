@@ -66,7 +66,7 @@ class MpptCurtailmentEstimator {
         this.last_uncurtailed_ts = state.lc;
         this.last_uncurtailed_power = getState(this.UNCURTAILED_PANEL_VOLTAGE_POWER_OBJ).val;
         this.last_uncurtailed_temperature = getState(this.UNCURTAILED_PANEL_VOLTAGE_TEMPERATURE_OBJ).val;
-        console.log("Updating uncurtailed panel voltage from state: " + this.uncurtailed_panel_voltage + "V @ " + this.last_uncurtailed_power + "W with " + this.last_uncurtailed_temperature + "°C.");
+        console.log("Updating uncurtailed panel voltage from state: " + Math.round(this.uncurtailed_panel_voltage*10)/10 + "V @ " + this.last_uncurtailed_power + "W with " + Math.round(this.last_uncurtailed_temperature*10)/10 + "°C.");
     }
 
     calculatePowerVoltageCorrection(reference_power) {

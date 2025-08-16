@@ -48,6 +48,11 @@ class HeatPump {
         this.EFFICIENCY_FACTOR = this.root_obj + ".efficiency";
         createState(this.EFFICIENCY_FACTOR, 1, {read: true, write: false, name: "Heatpump Efficency Factor", type: "number", def: 1});
 
+        this.DAY_WARMWATER_ENERGY_OBJ = this.root_obj + ".day_warmwater_energy";
+        createState(this.DAY_WARMWATER_ENERGY_OBJ, 0, {read: true, write: false, name: "WarmWater Energy Day", type: "number", unit: "Wh", def: 0});
+        this.DAY_HEATING_ENERGY_OBJ = this.root_obj + ".day_heating_energy";
+        createState(this.DAY_HEATING_ENERGY_OBJ, 0, {read: true, write: false, name: "Heating Energy Day", type: "number", unit: "Wh", def: 0});
+
         this.updateState();
     }  
     
@@ -232,7 +237,7 @@ class HeatPump {
         if(this.isWarmWaterAllowedToStart() || (this.isWarmWaterOn() && this.semp_client.isWarmWaterControllable())) {
             if(min_available_power >= expected_power_consumption && !this.hasReachedWarmWaterTemp()) {
                 if(this.semp_client.requestWarmWater(true, false)) {
-                    console.log("Requested WarmWater ON with min power: " + min_available_power + "W / " + expected_power_consumption + "W");
+                    console.log("Requested WarmWater ON with min power: " + Math.round(min_available_power) + "W / " + expected_power_consumption + "W");
                 }
             } 
         }
@@ -243,7 +248,7 @@ class HeatPump {
        if(this.isWarmWaterAllowedToStop()) {
             if(available_power < expected_power_consumption) {
                 if(this.semp_client.requestWarmWater(false, false)) {
-                    console.log("Requested WarmWater OFF because of low available power: " + available_power + "W / " + expected_power_consumption + "W");
+                    console.log("Requested WarmWater OFF because of low available power: " + Math.round(available_power) + "W / " + Math.round(expected_power_consumption) + "W");
                 }
             } else if(this.hasReachedWarmWaterTemp()) {
                 if(this.semp_client.requestWarmWater(false, false)) {
@@ -258,14 +263,14 @@ class HeatPump {
         if(this.isHeatingAllowedToStart() || (this.isHeatingOn() && this.semp_client.isHeatingControllable())) {
             if(min_available_power >= min_heating_power && !this.hasReachedHeatingBufferTemp()) {
                 if(this.semp_client.requestHeating(recommended_power, false)) {
-                    console.log("Requested Heating ON with recommended power: " + recommended_power + "W / " + min_heating_power + "W");
+                    console.log("Requested Heating ON with recommended power: " + Math.round(recommended_power) + "W / " + Math.round(min_heating_power) + "W");
                 }
             } 
         }
         if(this.isHeatingAllowedToStop()) {
             if(max_available_power < min_heating_power) {
                 if(this.semp_client.requestHeating(0, false)) {
-                    console.log("Requested Heating OFF because of low available power: " + max_available_power + "W / " + min_heating_power + "W");
+                    console.log("Requested Heating OFF because of low available power: " + Math.round(max_available_power) + "W / " + Math.round(min_heating_power) + "W");
                 }
             } else if(this.hasReachedHeatingBufferTemp()) {
                 if(this.semp_client.requestHeating(0, false)) {
@@ -298,7 +303,7 @@ class HeatPump {
         } else {
             recommended_power = 0;
         }
-        console.log("Modulating Heating Power: " + recommended_power + "W - Availability: " + availability_offset + "W (" + power_diff + "W), Target: " + target_offset + "W (" + temp_diff + "°C).");
+        console.log("Modulating Heating Power: " + Math.round(recommended_power) + "W - Availability: " + availability_offset + "W (" + power_diff + "W), Target: " + target_offset + "W (" + temp_diff + "°C).");
         return recommended_power;
     }
 
@@ -330,6 +335,9 @@ class HeatPump {
         this.required_warmwater_runtime = this.estimateWarmWaterRunMinsRequired(this.getWarmWaterTarget()); 
         this.required_heating_runtime = this.estimateHeatingRunMinsRequired(this.getHeatingTarget());
 
+        accumulateDailyEnergyStat(this.DAY_HEATING_ENERGY_OBJ, this.semp_client.getHeatingPower());
+        accumulateDailyEnergyStat(this.DAY_WARMWATER_ENERGY_OBJ, this.semp_client.getWarmWaterPower());
+
         this.hk2_pump_on = getStateIfExisting(this.hk2_pump_obj, false);
         setState(this.HK2_PUMP_OBJ, this.hk2_pump_on, true);
         this.hk3_pump_on = getStateIfExisting(this.hk3_pump_obj, false);
@@ -338,6 +346,5 @@ class HeatPump {
         setState(this.EFFICIENCY_FACTOR, efficiency_factor, true);
 
         this.semp_client.writeState();
-
     }
 }

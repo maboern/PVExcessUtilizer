@@ -18,8 +18,6 @@
 // Static Script Parameters
 var SCRIPT_UPDATE_INTERVAL_SEC = 15;
 var SCRIPT_DEBUG = false;
-const EXCESS_POWER_START_PERCENTILE = 20;
-const EXCESS_POWER_STOP_PERCENTILE = 80;
 var scriptRunTimeSecs = 0;
 var isReady = false;
 var non_controlled_consumption_smoothed = 0;
@@ -156,6 +154,8 @@ function controlLoads()
     let cur_disposable_load_power = calculateDisposableLoadPower();
     let excess_power = pv.getRecentExcessPowerMeasurements();
 
+    const EXCESS_POWER_START_PERCENTILE = 20;
+    const EXCESS_POWER_STOP_PERCENTILE = 80;
     let min_excess_power = Math.min(excess_power.tail(5*60).percentile(EXCESS_POWER_START_PERCENTILE),
                                     excess_power.tail(60).percentile(EXCESS_POWER_START_PERCENTILE));
     let min_available_power = min_excess_power + cur_disposable_load_power;
@@ -182,8 +182,12 @@ function updateControl() {
     controlLoads();
 }
 
-function atSunrise() {
+function atDawn() {
     pv_forecast.retrieve();
+}
+schedule('{"time":{"exactTime":true,"start":"dawn"},"period":{"days":1}}', atDawn);
+
+function atSunrise() {
     heatpump_mgr.updateAtSunrise();
 }
 schedule('{"time":{"exactTime":true,"start":"sunrise"},"period":{"days":1}}', atSunrise);
@@ -197,18 +201,6 @@ function hourly() {
     heatpump_mgr.updateHourly();
 }
 schedule('{"time":{"start":"sunrise","end":"sunset","mode":"hours","interval":1},"period":{"days":1}}', hourly);
-
-function resetDayValues() {
-    console.log("Resetting statistics values of previous day!");
-
-    pv.resetDayValues();
-    jackery.resetDayValues();
-    boiler.resetDayValues();
-    heater.resetDayValues();
-    car.resetDayValues();
-    heatpump_mgr.resetDayValues();
-}
-schedule('{"time":{"exactTime":true,"start":"nadir"},"period":{"days":1}}', resetDayValues);
 
 var ControlInterval = setInterval(function () {
     updateControl(); // start processing in interval
