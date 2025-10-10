@@ -26,7 +26,7 @@ class ControllableBattery extends ControllableLoad {
 
         this.level_of_charge_percent_obj = this.root_obj + '.loc_percent';
         createState(this.level_of_charge_percent_obj, 0, {read: true, write: true, name: "Level of Charge Percent", type: "number", unit: "%", def: 100});
-        this.level_of_charge_percent = getState(this.level_of_charge_percent_obj).val;
+        this.level_of_charge_percent = Number(getState(this.level_of_charge_percent_obj).val);
 
         console.log("Initialized " + this.toString());
     }
@@ -70,7 +70,7 @@ class ControllableBattery extends ControllableLoad {
 
     checkUpdateLocFromState() {
         var old_loc = this.level_of_charge_percent;
-        this.level_of_charge_percent = getState(this.level_of_charge_percent_obj).val;
+        this.level_of_charge_percent = Number(getState(this.level_of_charge_percent_obj).val);
         setState(this.level_of_charge_percent_obj, this.level_of_charge_percent, true);
         if(this.level_of_charge_percent != old_loc) {
             console.log("Load " + this.name + ": Updated LOC " + old_loc + "% -> " + this.level_of_charge_percent + "%");

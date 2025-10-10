@@ -175,12 +175,14 @@ class PVSystem {
     }
 
     updateShadingLossEstimate() {
+        const PV_POWER_MEASUREMENT_TOLERANCE = 0.001; // 0.1% peak power measurement tolerance
+        const SHADING_LOSS_TOLERANCE = PV_POWER_MEASUREMENT_TOLERANCE * (this.INV10_MAX_POWER_WATTS + this.INV15_MAX_POWER_WATTS);
         /* The 15kW Inverter should produce more than the 10kW inverter proportional to the number
         of PV Panels on the string. */
         var inv15_potential_pv_production = this.inv10_power * this.INV15_NR_PV_PANELS / this.INV10_NR_PV_PANELS;
         var unshaded_pv_production = this.inv10_power + inv15_potential_pv_production;
 
-        if(unshaded_pv_production > this.pv_power) {
+        if(unshaded_pv_production > this.pv_power + SHADING_LOSS_TOLERANCE) {
             this.pv_shading_loss = unshaded_pv_production - this.pv_power;
         } else {
             this.pv_shading_loss = 0;

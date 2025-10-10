@@ -18,6 +18,8 @@ class HeatPumpSempClient {
         this.max_request_interval_s = 60;
         this.device_id_warmwater = '0-0000A83A-0202A0669206-00'
         this.device_id_heating = '0-0000A83A-0202A0669206-01';
+        this.startup_grace_period = 2*60*1000; // The power reading is unreliable for the first few minutes.
+
 
         this.status_up_to_date = false; // Will bet set to true with first status update
 
@@ -74,15 +76,19 @@ class HeatPumpSempClient {
 
     isWarmWaterControllable() { return this.warmwater_controllable; }
     isWarmWaterOn() { return this.warmwater_on; }
+    isWarmWaterStartingUp() { return isNowInTimePeriod(this.warmwater_started_ts, this.startup_grace_period); }
     getWarmWaterStartTimeStamp() { return this.warmwater_started_ts; }
     getWarmWaterPower() { return this.warmwater_power; }
     getWarmWaterMaxPower() { return this.warmwater_plan ? this.warmwater_plan_max_power : this.warmwater_max_power; }
 
     isHeatingControllable() { return this.heating_controllable; }
     isHeatingOn() { return this.heating_on; }
+    isHeatingStartingUp() { return isNowInTimePeriod(this.heating_started_ts, this.startup_grace_period); }
     getHeatingStartTimeStamp() { return this.heating_started_ts; }
+    getHeatingStopTimeStamp() { return this.heating_stopped_ts; }
     getHeatingPower() { return this.heating_power; }
     getHeatingMinPower() { return this.heating_plan ? this.heating_plan_min_power : this.heating_min_power; }
+    getRequestedHeatingPower() { return this.isLastHeatingRequestStillValid() ? this.last_heating_request_power : 0;}
 
     processWarmWaterStatusUpdate(status) {
         let warmwater_was_on = this.warmwater_on;
@@ -117,11 +123,16 @@ class HeatPumpSempClient {
 
         if(this.status_up_to_date) {
             if(!heating_was_on && this.heating_on) {
+                // Usually, we should detect the starting already in the startup phase by power consumption below. This remains as fallback.
                 console.log("Heatpump Heating STARTED");
                 this.heating_started_ts = Date.now();
-            } else if(heating_was_on && !this.heating_on) {
+            } else if(heating_was_on && !this.heating_on && this.heating_power == 0) {
                 console.log("Heatpump Heating STOPPED");
                 this.heating_stopped_ts = Date.now()
+            } else if(!this.heating_on && this.heating_power > 0) {
+                if(!heating_was_on) { console.log("Heatpump Heating is STARTING UP (" + this.heating_power + "W)"); }
+                this.heating_on = true;
+                this.heating_started_ts = Date.now();
             }
         }
     }
@@ -183,15 +194,13 @@ class HeatPumpSempClient {
             this.heating_plan = false;
         }
     }
-    
     filterHeatpumpStartupPower() {
-        const STARTUP_GRACE_PERIOD = 2*60*1000; // The power reading is unreliable for the first few minutes.
         const DEFAULT_STARTUP_POWER = 600;
 
-        if(isNowInTimePeriod(this.warmwater_started_ts, STARTUP_GRACE_PERIOD)) {
+        if(this.isWarmWaterStartingUp()) {
             this.warmwater_power = DEFAULT_STARTUP_POWER;
         }
-        if(isNowInTimePeriod(this.heating_started_ts, STARTUP_GRACE_PERIOD)) {
+        if(this.isHeatingStartingUp()) {
             this.heating_power = DEFAULT_STARTUP_POWER;
         }
     }
@@ -209,6 +218,9 @@ class HeatPumpSempClient {
     }
 
     canReRequest(last_ts) { return (Date.now() >= last_ts + this.max_request_interval_s*1000); }
+
+    isLastRequestStillValid(last_ts) { return (Date.now() >= last_ts + (this.max_request_interval_s + 30)*1000);}
+    isLastHeatingRequestStillValid() { return this.isLastRequestStillValid(this.last_heating_request_ts); }
 
     requestWarmWater(on, force) {
         if(this.warmwater_controllable) {

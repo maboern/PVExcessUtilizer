@@ -1,0 +1,33 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+const HEATPUMP_MODE = Object.freeze({
+    PASSIVE : "PASSIVE",     // Do not actively start the heatpump
+    EFFICIENT : "EFFICIENT",  // Lowest power possible for heatpump to be most efficient.
+    MODULATED : "MODULATED", // Modulate heatpump power to follow available solar surplus
+    BUFFERING : "BUFFERING", // Try to fill buffers as fast as possible with available surplus energy.
+    EFFICIENT_BUFFERING : "EFFICIENT BUFFERING", // Same as Buffering, but keep heatpump lower in an efficient regime
+});
+
+class HeatPumpMode 
+{
+    static getDefaultTargetSettings(mode) {
+        switch(mode) {
+            case HEATPUMP_MODE.PASSIVE:            
+            case HEATPUMP_MODE.EFFICIENT:
+                return EFFICIENT_HEATPUMP_EMI_SETTINGS;
+            case HEATPUMP_MODE.EFFICIENT_BUFFERING:
+                return DEFAULT_HEATPUMP_EMI_SETTINGS;
+            case HEATPUMP_MODE.BUFFERING:
+            case HEATPUMP_MODE.MODULATED:
+                return MAX_BUFFER_HEATPUMP_EMI_SETTINGS;
+            default:
+                console.error("Unsupported HEATPUMP MODE: " + mode);
+                return DEFAULT_HEATPUMP_EMI_SETTINGS;
+        }
+    }
+}

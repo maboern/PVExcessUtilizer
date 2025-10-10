@@ -101,8 +101,9 @@ class PVForecast {
 
     getPeakTime() { if(this.peak_time === undefined) {this.findPeakTime();} return this.peak_time; }
     getPeakPower(peak_time) { return this.getForecast(peak_time); }
+    getSecondsAfterPeakTime() { return (Date.now() - this.getPeakTime().getTime())/1000; }
     findPeakTime() {
-        var datetime = new Date();
+        var datetime = new Date(new Date().setHours(5, 0, 0, 0));
         
         const STEP_SIZE_MINUTES = 5;
         let peak_time = datetime;
@@ -115,16 +116,24 @@ class PVForecast {
             }
             datetime = addMinutes(datetime, STEP_SIZE_MINUTES);
         }
-        this.peak_time = peak_time;
 
-        console.log("Forecasting " + Math.round(peak_power) + "W peak at " + peak_time.toTimeString() + "today.");
-        return peak_time;
+        console.log("Forecasting " + Math.round(peak_power) + "W peak at " + peak_time.toTimeString() + " today.");
+        this.peak_time = peak_time;
+        return this.peak_time;
     }
 
     getLoadCorrectedForecast(datetime) {
         return this.getForecast(datetime) - this.base_power_reserve - this.ondemand_power_on_ratio*this.ondemand_power_reserve;
     }
+    
+    upcomingSurplusForecasted(next_minutes, required_power, reserve_factor) {
+        let now = new Date();
+        let upcoming_forecast = this.getLoadCorrectedForecast(addMinutes(now, next_minutes));
+        return upcoming_forecast > required_power * reserve_factor;
+    }
 
+
+    isNight() { return this.getForecast(new Date()) == 0; }
     getForecast(datetime) { return this.getForecastRange(datetime).getEstimate(); }
     getForecastRange(datetime) {
         let hour = datetime.getHours();

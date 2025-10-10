@@ -6,12 +6,10 @@
 }
 -- do not edit previous lines - END --*/
 /* TODO:
-    - Start warmwater before heatpump starts it by itself due to low temperature to avoid EMI-ACTIVE-ECO
     - Start warmwater in Greedy to run during peak hours
     - Offset to min/max power being 0 at the peak, higher in the mornging and lower in the afternoon for greedy buffering
     - Modulated Heating: Differntial
     - Opportunistic Surplus Buffering and / or Modulation depending on Percentile of Power in Forecast
-    - Only do opportunistic Excess buffering if Forecast (of next hour?) near threshold
     - Solcast API, use 10%/90% spread to control available power lookback window
 */
 
@@ -41,7 +39,9 @@ let car = new ControllableBattery(SCRIPT_ID, 'Car', 78000, 1800, 0, 10*60, '08f9
 let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
 let heater = new ControllableHeater(SCRIPT_ID, 'CellarHeater');
 
-let heatpump_mgr = new HeatPumpManager(SCRIPT_ID, pv_forecast, boiler);
+let heatpump = new HeatPump(SCRIPT_ID, boiler);
+let heatpump_ww_mgr = new HeatPumpWWManager(SCRIPT_ID, heatpump, pv_forecast);
+let heatpump_heat_mgr = new HeatPumpHeatManager(SCRIPT_ID, heatpump, pv_forecast);
 
 function getRecentStateVal(obj) {
     const SCRIPT_MAX_VALUE_AGE = 60 * 1000;
@@ -84,7 +84,8 @@ function calculateControllableLoadPower() {
     cur_total_load_power += boiler.getCurrentPower();
     cur_total_load_power += jackery.getCurrentPower();
     cur_total_load_power += car.getCurrentPower();
-    cur_total_load_power += heatpump_mgr.getCurrentPower();
+    cur_total_load_power += heatpump_ww_mgr.getCurrentPower();
+    cur_total_load_power += heatpump_heat_mgr.getCurrentPower();
     return cur_total_load_power;
 }
 
@@ -121,7 +122,9 @@ function validateRunning() {
 function updateLoadControl(min_available_power, max_available_power)
 {
     // The Heatpump is outside of priority order and always gets priority.
-    heatpump_mgr.control(pv.getRecentAvailableSurplusPowerMeasurements(), pv.getRecentAvailableExcessPowerMeasurements());
+    heatpump.updateState();
+    heatpump_ww_mgr.control(pv.getRecentAvailableSurplusPowerMeasurements(), pv.getRecentAvailableExcessPowerMeasurements());
+    heatpump_heat_mgr.control(pv.getRecentAvailableSurplusPowerMeasurements(), pv.getRecentAvailableExcessPowerMeasurements());
 
     // TODO: Calculate Confidence Level from Generation Nowcast (Power - Forecast)
     // and Consumption Forecast (SEMP / maybe Statistics)
@@ -188,7 +191,8 @@ function atDawn() {
 schedule('{"time":{"exactTime":true,"start":"dawn"},"period":{"days":1}}', atDawn);
 
 function atSunrise() {
-    heatpump_mgr.updateAtSunrise();
+    pv_forecast.findPeakTime(); 
+    heatpump_ww_mgr.updateAtSunrise();
 }
 schedule('{"time":{"exactTime":true,"start":"sunrise"},"period":{"days":1}}', atSunrise);
 
@@ -198,7 +202,8 @@ function middayHourly() {
 schedule('{"time":{"start":"08:37","end":"15:50","mode":"hours","interval":1},"period":{"days":1}}', middayHourly);
 
 function hourly() {
-    heatpump_mgr.updateHourly();
+    heatpump_ww_mgr.updateHourly();
+    heatpump_heat_mgr.updateHourly();
 }
 schedule('{"time":{"start":"sunrise","end":"sunset","mode":"hours","interval":1},"period":{"days":1}}', hourly);
 
