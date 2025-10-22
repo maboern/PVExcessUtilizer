@@ -53,14 +53,14 @@ class HeatPumpHeatManager {
             return false; 
         }
         let min_required_heating_power = this.heatpump.getExpectedHeatingPower();
-        let surplus_forecasted_now = this.pv_forecast.upcomingSurplusForecasted(0,  min_required_heating_power, 2);
-        let surplus_forecasted_soon = this.pv_forecast.upcomingSurplusForecasted(60,  min_required_heating_power, 2);
+        let surplus_forecasted_now = this.pv_forecast.upcomingSurplusForecasted(0, min_required_heating_power, 1.2);
+        let surplus_forecasted_soon = this.pv_forecast.upcomingSurplusForecasted(60, min_required_heating_power, 1.2);
         let surplus_now = min_power > min_required_heating_power;
         return surplus_forecasted_soon && surplus_forecasted_now && surplus_now; 
     }
 
     shouldStopRoomOverheating(max_power) {
-        if(this.pv_forecast.isNight() || this.getHeatingMode() == HEATPUMP_MODE.BUFFERING )  { return true; } // No room overheating while buffering
+        if(this.getHeatingMode() == HEATPUMP_MODE.BUFFERING )  { return true; } // No room overheating while buffering
         if(!this.heatpump.isRoomOverheating()) { return false; } // Already not overheating
         let no_remaining_surplus_forecasted = this.remaining_heating_surplus_time <= 0;
         let surplus_now = max_power > this.heatpump.getExpectedHeatingPower();
@@ -73,6 +73,36 @@ class HeatPumpHeatManager {
             this.heatpump.startRoomOverheating();
         } else if(this.shouldStopRoomOverheating(max_power)) {
             this.heatpump.stopRoomOverheating();
+        } else if(this.shouldStartRoomUnderheating()) {
+            this.heatpump.startRoomUnderheating();
+        } else if(this.shouldStopRoomUnderheating()) {
+            this.heatpump.stopRoomUnderheating();
+        }
+    }
+
+    shouldStartRoomUnderheating() {
+        if(this.heatpump.isInSummerMode() || this.heatpump.isRoomUnderheating()) { return false; }
+        if(this.pv_forecast.isNight()) {
+            /*let overpowered = this.heatpump.isInOverpoweredRegime(this.heatpump.getTargetHeatingBufferTemp());
+            if(overpowered) {
+                return this.heatpump.getHeatingBufferTempOvershoot() > 0;  TODO
+            } else {
+                return this.heatpump.isHeatingBufferTempAtEfficientMax();
+            }*/ 
+            
+            return this.heatpump.isHeatingBufferTempAtEfficientMax();
+        } else {
+            return false;
+        }
+    }
+
+    shouldStopRoomUnderheating() {
+        if(!this.pv_forecast.isNight() || !this.heatpump.isRoomUnderheating()) { return false; }
+        if(this.heatpump.isHeatingOn() || this.heatpump.isHeatingStartingUp()) {
+            return !this.heatpump.isHeatingBufferTempAtEfficientMax();
+            //return this.heatpump.getHeatingBufferTempOvershoot() <= 0;
+        } else {
+            return false;
         }
     }
     
@@ -81,7 +111,8 @@ class HeatPumpHeatManager {
         if(surplus_forecasted) {
             let time_to_start = this.remaining_heating_surplus_time < this.heatpump.getRequiredHeatingRunTimeToMaxBuffer();
             let necessary_to_start = this.heatpump.getHeatingBufferTemp() <= DEFAULT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp();
-            return isAfternoon() && time_to_start && necessary_to_start; 
+            let heat_consumption_low = this.heatpump.areRoomsOverheated();
+            return isAfternoon() && time_to_start && necessary_to_start && heat_consumption_low; 
         } else {
             return false;
         }
@@ -110,8 +141,10 @@ class HeatPumpHeatManager {
 
         if(this.heatpump.isInSummerMode()) {
             this.setHeatingMode(HEATPUMP_MODE.PASSIVE, "in summer mode.");
+            this.heatpump.controlPassiveHeating();
         } else if(this.pv_forecast.isNight()) {
             this.setHeatingMode(HEATPUMP_MODE.PASSIVE, "night time.");
+            this.heatpump.controlPassiveHeating();
         } else if(this.doStartHeatingSurplusBufferingNow() || this.canContinueHeatingBuffering(max_surplus_power)) { 
             this.setHeatingMode(HEATPUMP_MODE.BUFFERING, "it is time to start buffering surplus now");
             this.heatpump.controlMaxBufferingHeating(min_surplus_power, max_surplus_power);
@@ -123,6 +156,23 @@ class HeatPumpHeatManager {
         } else {
             this.setHeatingMode(HEATPUMP_MODE.MODULATED, "greedy heating.");
             this.heatpump.controlModulatedHeating(min_surplus_power, max_surplus_power);
+        }
+    }
+
+    calculatePotentialExcessControlPower() {
+        if(this.heatpump.isHeatingOn() && this.getHeatingMode() == HEATPUMP_MODE.EFFICIENT) {
+            let potential_headroom = this.heatpump.getMaxHeatingPower() - this.heatpump.getMinHeatingPower();
+            return potential_headroom;
+        } else {
+            return 0;
+        }
+    }
+    setExcessControlPower(control_power) { this.excess_control_power = control_power; }
+    getExcessControlPower() { 
+        if(this.heatpump.isHeatingOn() && this.getHeatingMode() == HEATPUMP_MODE.EFFICIENT) {
+            return this.heatpump.getCurrentHeatingPower() - this.heatpump.getMinHeatingPower();
+        } else {
+            return 0;
         }
     }
 

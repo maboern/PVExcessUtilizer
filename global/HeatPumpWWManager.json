@@ -153,7 +153,9 @@ class HeatPumpWWManager {
     doStartForecastBasedWarmWaterSurplusBuffering() {   
         let surplus_expected = this.pv_forecast.upcomingSurplusForecasted(30, this.heatpump.getExpectedWarmWaterPower(), 2);
         let high_surplus_expected = this.pv_forecast.upcomingSurplusForecasted(30, this.heatpump.getExpectedWarmWaterPower(), 3);
-        let can_start = isAfternoon() && surplus_expected;
+        let peak_soon = this.pv_forecast.getSecondsAfterPeakTime() > -45*60; // Forecasted peak within the next 45 Minutes
+        let after_peak = this.pv_forecast.getSecondsAfterPeakTime() > 0;
+        let can_start = (peak_soon || after_peak) && surplus_expected;
         let necessary_to_start = this.heatpump.getWarmWaterTemp() < DEFAULT_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp();
         return (can_start) && (necessary_to_start || high_surplus_expected); 
     }
@@ -194,7 +196,7 @@ class HeatPumpWWManager {
     }
     canContinueWarmWaterBuffering(max_power) {
         let is_ww_on = this.heatpump.isWarmWaterOn(); 
-        let is_heating_finishing = this.heatpump.isHeatingOn() && this.heatpump.hasReachedHeatingBufferTemp();
+        let is_heating_finishing = this.heatpump.isHeatingOn() && this.heatpump.isHeatingBufferTempAtEfficientMax();
         let is_allowed_to_start = this.heatpump.isWarmWaterAllowedToStart();
         let can_continue = max_power >= this.heatpump.getExpectedWarmWaterPower();
         let can_continue_after_heating = is_heating_finishing && is_allowed_to_start && can_continue;
@@ -277,7 +279,7 @@ class HeatPumpWWManager {
             this.setWarmWaterMode(HEATPUMP_MODE.BUFFERING, "WarmWater already running");
             this.heatpump.controlWarmWater(min_surplus_power, max_surplus_power);
         }  else if(this.doStartForecastBasedWarmWaterSurplusBuffering()) {
-            this.setWarmWaterMode(HEATPUMP_MODE.BUFFERING, "opportunistic Surplus Buffering");
+            this.setWarmWaterMode(HEATPUMP_MODE.BUFFERING, "forecast-based Surplus Buffering");
             this.heatpump.controlWarmWater(min_surplus_power, max_surplus_power);
         } else if(this.checkSurplusOnlyFeasible()) {
             this.setWarmWaterMode(HEATPUMP_MODE.PASSIVE, "waiting for time to start surplus buffering");

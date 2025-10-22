@@ -24,9 +24,9 @@ function addMinutes(date, minutes) {
     return new Date(date.getTime() + minutes*60000);
 }
 
-function isNowInTimePeriod(start_ts, length) {
+function isNowInTimePeriod(start_ts, length_ms) {
     let now = Date.now();
-    return (now > start_ts && now < start_ts + length);
+    return (now > start_ts && now < start_ts + length_ms);
 }
 
 function roundMinutesDownToHalfHours(date) {

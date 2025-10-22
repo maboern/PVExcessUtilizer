@@ -6,10 +6,7 @@
 }
 -- do not edit previous lines - END --*/
 /* TODO:
-    - Start warmwater in Greedy to run during peak hours
-    - Offset to min/max power being 0 at the peak, higher in the mornging and lower in the afternoon for greedy buffering
     - Modulated Heating: Differntial
-    - Opportunistic Surplus Buffering and / or Modulation depending on Percentile of Power in Forecast
     - Solcast API, use 10%/90% spread to control available power lookback window
 */
 

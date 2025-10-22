@@ -95,7 +95,7 @@ class HeatPumpEmiSettings {
     }
     setMaxBufferValues() {
         this.emi_on = 1;
-        this.warmwater_temp = 53;
+        this.warmwater_temp = 52;
         this.heating_buffer_temp = 48;
         this.settings = HEATPUMP_EMI_SETTINGS.MAX_BUFFER;
     }

@@ -26,8 +26,12 @@ class HeatPump {
         this.ww_output_power_kw_winter_obj = 'stiebel-isg.0.settings.WARMWASSER.WW LEISTUNG WP.val1127';
         this.ww_eco_temp_obj = 'stiebel-isg.0.settings.WARMWASSER.WARMWASSERTEMPERATUREN.val11019';
         this.ww_hysteresis_obj = 'stiebel-isg.0.settings.WARMWASSER.GRUNDEINSTELLUNG.val120';
+        this.hk2_room_temp_obj = 'stiebel-isg.0.info.ANLAGE.RAUMTEMPERATUR.ISTTEMPERATUR_2';
+        this.hk3_room_temp_obj = 'stiebel-isg.0.info.ANLAGE.RAUMTEMPERATUR.ISTTEMPERATUR_3';
         this.hk2_room_temp_target_obj = 'stiebel-isg.0.settings.HEIZEN.HEIZKREIS 2.val10980';     
         this.hk3_room_temp_target_obj = 'stiebel-isg.0.settings.HEIZEN.HEIZKREIS 3.val10986';
+        this.compressor_starts_obj = 'stiebel-isg.0.info.WAERMEPUMPE.STARTS.VERDICHTER';
+        this.compressor_starts_defrost_obj = 'stiebel-isg.0.info.WAERMEPUMPE.LAUFZEIT.STARTS_ABTAUEN';
 
         this.required_boiler_runtime = 0;
         this.required_warmwater_runtime = 0;
@@ -37,6 +41,7 @@ class HeatPump {
         this.min_heatpump_runtime_mins = 15; // Do not start the heatpump if it is expected to run less than that time.
         this.min_heating_pause_secs = 10*60; // Grace period between heating runs
         this.heating_buffer_volume = 400; // 400 l
+        this.heating_buffer_temperature_corr = 4; // The HK mixers are less than half-open if the heating buffer sensor reports hitting the required temperature. 
         this.warmwater_output_power = 7000; // The heatpump works in a constant output (heat) power regime with variable electric power input
         this.heating_buffering_input_power_target = 2000; // The expected "norm" power when heating buffering.
         this.heating_buffering_input_power_max = 3500; // The "maximum" power when heating buffering
@@ -46,8 +51,10 @@ class HeatPump {
          
         this.hk2_room_temp_comfort = 21;
         this.hk2_room_temp_overheat = 21.6;
+        this.hk2_room_temp_eco = 20.6;
         this.hk3_room_temp_comfort = 22;
         this.hk3_room_temp_overheat = 22.8;
+        this.hk3_room_temp_eco = 21.6;
 
         this.warmwater_target = EFFICIENT_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp();
         this.heating_buffer_max = EFFICIENT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp();
@@ -57,6 +64,9 @@ class HeatPump {
         this.modulation_recommended = 0;
         this.modulation_temp_offset = 0;
         this.modulation_availability_offset = 0;
+
+        this.compressor_starts = 0;
+        this.compressor_starts_defrost = 0;
         
         this.HK2_PUMP_OBJ = this.root_obj + ".hk2_pump";
         createState(this.HK2_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK2", type: "boolean", def: false});
@@ -64,11 +74,22 @@ class HeatPump {
         createState(this.HK3_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK3", type: "boolean", def: false});
         this.EFFICIENCY_FACTOR = this.root_obj + ".efficiency";
         createState(this.EFFICIENCY_FACTOR, 1, {read: true, write: false, name: "Heatpump Efficency Factor", type: "number", def: 1});
+        this.COMPRESSOR_STARTS = this.root_obj + ".compressor_starts";
+        createState(this.COMPRESSOR_STARTS, 0, {read: true, write: false, name: "Heatpump Compressor Starts", type: "number", def: 0});
+        this.COMPRESSOR_STARTS_DEFROST = this.root_obj + ".compressor_starts_defrost";
+        createState(this.COMPRESSOR_STARTS_DEFROST, 0, {read: true, write: false, name: "Heatpump Compressor Starts (Defrosting)", type: "number", def: 0});
         this.ESTIMATED_WARMWATER_POWER = this.root_obj + ".estimated_warmwater_power";
         createState(this.ESTIMATED_WARMWATER_POWER, 0, {read: true, write: false, name: "Estimated WarmWater Power", type: "number", unit: "W", def: 0});
+        this.EMI_MODE = this.root_obj + ".emi_mode";
+        createState(this.EMI_MODE, "UNKNOWN", {read: true, write: false, name: "EMI Mode", type: "string", def: "UNKNOWN"});
         
+
+        this.HEATING_BUFFER_TEMP = this.root_obj + ".heating_buffer_temp";
+        createState(this.HEATING_BUFFER_TEMP, 40, {read: true, write: false, name: "Heating Buffer Temperature (corrected)", type: "number", unit: "°C", def: 45});
         this.HEATING_BUFFER_MAX_TEMP = this.root_obj + ".heating_buffer_max_temp";
         createState(this.HEATING_BUFFER_MAX_TEMP, 45, {read: true, write: false, name: "Max Heating Buffer Temperature", type: "number", unit: "°C", def: 45});
+        this.HEATING_BUFFER_TEMP_OVER = this.root_obj + ".heating_buffer_temp_overshoot";
+        createState(this.HEATING_BUFFER_TEMP_OVER, 0, {read: true, write: false, name: "Heating Buffer Temperature Overshoot", type: "number", unit: "°C", def: 0});
         this.EQUILIBRIUM_HEATING_POWER = this.root_obj + ".equilibrium_heating_power";
         createState(this.EQUILIBRIUM_HEATING_POWER, 0, {read: true, write: false, name: "Required Equilibrium Heating Power", type: "number", unit: "W", def: 0});
         this.MODULATION_RECOMMENDED = this.root_obj + ".modulation_recommended";
@@ -98,7 +119,19 @@ class HeatPump {
         }
         this.updateState();
     }
+    getEmiMode() {
+        if(getStateIfExisting('stiebel-isg.0.info.ANLAGE.ENERGIEMANAGEMENT.EMI_OK', null)) { return "EMI_OK";}
+        if(getStateIfExisting('stiebel-isg.0.info.ANLAGE.ENERGIEMANAGEMENT.EMI_ACTIVE_HIGH', null)) { return "EMI_ACTIVE_HIGH";}
+        if(getStateIfExisting('stiebel-isg.0.info.ANLAGE.ENERGIEMANAGEMENT.EMI_ACTIVE_COMFORT', null)) { return "EMI_ACTIVE_COMFORT";}
+        if(getStateIfExisting('stiebel-isg.0.info.ANLAGE.ENERGIEMANAGEMENT.EMI_ACTIVE_ECO', null)) { return "EMI_ACTIVE_ECO";}
+        return "UNKNOWN";
+    }
 
+    calculateEfficientHeatingBufferMax() {
+        const HEATING_BUFFER_HYSTERESIS = 5; // Go max 5°C above target temperature
+        const LOWEST_HEATING_BUFFER_MAX = 32; // But at least 32°C
+        return Math.max(this.getTargetHeatingBufferTemp() + HEATING_BUFFER_HYSTERESIS, LOWEST_HEATING_BUFFER_MAX);
+    }
     getHeatingBufferMax() { return this.heating_buffer_max; }
     setHeatingBufferMax(temp, reason) {
         if(temp != this.heating_buffer_max) {
@@ -112,12 +145,16 @@ class HeatPump {
     getRequestedHeatingPower() { return this.semp_client.getRequestedHeatingPower(); }
     isInSummerMode() { return getStateIfExisting(this.summer_mode_obj, false);  }
     areHeatingCirculationPumpsOn() { return this.hk2_pump_on || this.hk3_pump_on; }
-    getHeatingBufferTemp() { return getStateIfExistingWithMaxAge(this.heating_buffer_temp_obj, 3*60*60, this.getHeatingBufferMax()); }
+    getHeatingBufferTemp() { 
+        return getStateIfExistingWithMaxAge(this.heating_buffer_temp_obj, 3*60*60, EFFICIENT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp()) +  this.heating_buffer_temperature_corr; 
+    }
     getTargetHeatingBufferTemp() {
-        let target_hk2_temp = getStateIfExistingWithMaxAge(this.target_hk2_temp_obj, 3*60*60, this.getHeatingBufferMax());
-        let target_hk3_temp = getStateIfExistingWithMaxAge(this.target_hk3_temp_obj, 3*60*60, this.getHeatingBufferMax());
+        let target_hk2_temp = getStateIfExistingWithMaxAge(this.target_hk2_temp_obj, 3*60*60, EFFICIENT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp());
+        let target_hk3_temp = getStateIfExistingWithMaxAge(this.target_hk3_temp_obj, 3*60*60, EFFICIENT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp());
         return Math.max(target_hk2_temp, target_hk3_temp);
     }
+    getHeatingBufferTempOvershoot() { return this.getHeatingBufferTemp() - this.getTargetHeatingBufferTemp();   }
+    isHeatingBufferTempAtEfficientMax() { return this.getHeatingBufferTemp() - this.calculateEfficientHeatingBufferMax() > 0;}
     
     startRoomOverheating() {
         if(!this.isRoomOverheating()) {
@@ -138,12 +175,43 @@ class HeatPump {
         return hk3_room_temp_target > this.hk3_room_temp_comfort;
     }
 
+    areRoomsOverheated() {
+        const MIN_ROOM_OVERHEATING_THRESHOLD = 0.2;
+        let hk2_room_temp = getStateIfExisting(this.hk2_room_temp_obj, this.hk2_room_temp_comfort);
+        let hk3_room_temp = getStateIfExisting(this.hk3_room_temp_obj, this.hk3_room_temp_comfort);
+        if(hk2_room_temp >= this.hk2_room_temp_comfort + MIN_ROOM_OVERHEATING_THRESHOLD && 
+            hk3_room_temp >= this.hk3_room_temp_comfort + MIN_ROOM_OVERHEATING_THRESHOLD) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    startRoomUnderheating() {
+        if(!this.isRoomUnderheating()) {
+            setState(this.hk2_room_temp_target_obj, this.hk2_room_temp_eco, false);
+            setState(this.hk3_room_temp_target_obj, this.hk3_room_temp_eco, false);
+            console.log("Started Room Underheating.")
+        }
+    }
+    stopRoomUnderheating() {
+        if(this.isRoomUnderheating()) { 
+            setState(this.hk2_room_temp_target_obj, this.hk2_room_temp_comfort, false);
+            setState(this.hk3_room_temp_target_obj, this.hk3_room_temp_comfort, false);
+            console.log("Stopped Room Underheating.")
+        }
+    }
+    isRoomUnderheating() {
+        let hk3_room_temp_target = getStateIfExisting(this.hk3_room_temp_target_obj, this.hk3_room_temp_eco);
+        return hk3_room_temp_target < this.hk3_room_temp_comfort;
+    }
+
     estimateCurrentHeatPumpEfficiencyFactor() {
         let ambient_temperature = getStateIfExistingWithMaxAge(this.ambient_temperature_sensor_obj, 12*60*60, 10);
         if(this.isHeatingOn()) {
             return this.estimateHeatPumpEfficiencyFactor(ambient_temperature, this.getHeatingBufferTemp());
         } else if(this.isWarmWaterOn()) {
-            return this.estimateHeatPumpEfficiencyFactor(ambient_temperature, this.boiler.getTemperature());
+            return this.estimateHeatPumpEfficiencyFactor(ambient_temperature, this.getWarmWaterTemp());
         } else {
             return 0;
         }
@@ -252,13 +320,13 @@ class HeatPump {
     }
 
     estimateWarmWaterEnergyRequired(target_temperature) {
-        var temperature_diff = target_temperature - this.boiler.getTemperature();
+        var temperature_diff = target_temperature - this.getWarmWaterTemp();
         if(temperature_diff < 0) {
             temperature_diff = 0;
         }
         var kwh_per_degree = this.boiler.getVolume() * SPECIFIC_HEAT_CAPACITY_WATER_KWH;
         var required_energy_kwh = kwh_per_degree * temperature_diff;
-        if(this.DEBUG) { console.log("Warm Water Target: " + target_temperature + "°C, Current: " + this.boiler.getTemperature() + " => Energy: " + required_energy_kwh + "kWh");}
+        if(this.DEBUG) { console.log("Warm Water Target: " + target_temperature + "°C, Current: " + this.getWarmWaterTemp() + " => Energy: " + required_energy_kwh + "kWh");}
         return required_energy_kwh;
     }
 
@@ -272,6 +340,7 @@ class HeatPump {
     isHeatingAllowedToStart() { return (this.required_heating_runtime >= this.min_heatpump_runtime_mins) && this.hasHeatingMinPauseElapsed() && !this.semp_client.isWarmWaterStartingUp();}
     isHeatingAllowedToStop() { return this.semp_client.isHeatingControllable(); }
     isHeatingOn() { return this.semp_client.isHeatingOn(); }
+    isHeatingStartingUp() { return this.semp_client.isHeatingStartingUp();}
 
     isAllowedToStart() { return (this.isWarmWaterAllowedToStart() || this.isHeatingAllowedToStart());  }
     isOn() { return this.isWarmWaterOn() || this.isHeatingOn(); }
@@ -281,14 +350,35 @@ class HeatPump {
     getExpectedWarmWaterPower() { return this.warmwater_expected_power; }
     getExpectedHeatingPower() { return this.heating_expected_power; }
     getMinHeatingPower() { return this.semp_client.getHeatingMinPower(); }
+    getMaxHeatingPower() { return this.semp_client.getHeatingMaxPower(); }
     getExpectedBoilerPower() { return this.boiler.getExpectedPower(); }
     getCurrentPower() { return this.semp_client.getHeatingPower() + this.semp_client.getWarmWaterPower(); }
     getCurrentWarmWaterPower() { return this.semp_client.getWarmWaterPower(); }
     getCurrentHeatingPower() { return this.semp_client.getHeatingPower(); }
-    getWarmWaterTemp() {return this.boiler.getTemperature(); }
-    hasReachedWarmWaterTemp() { return this.boiler.getTemperature() >= this.getWarmWaterTarget(); }
-    hasReachedMaxBufferWarmWaterTemp() { return this.boiler.getTemperature() >= MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp(); }
+    getWarmWaterTemp() {return this.boiler.getTemperature() + this.calculateWarmWaterPertubationCorrection(); }
+    hasReachedWarmWaterTemp() { return this.getWarmWaterTemp() >= this.getWarmWaterTarget(); }
+    hasReachedMaxBufferWarmWaterTemp() { return this.getWarmWaterTemp() >= MAX_BUFFER_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp(); }
     hasReachedHeatingBufferTemp() { return this.getHeatingBufferTemp() >= this.getHeatingBufferMax(); }
+
+    calculateWarmWaterPertubationCorrection() {
+        const PERTUBATION_TIME_SECS = 7*60; // How long it takes for the WW to be fully pertubed.
+        const PERTUBATION_SETTLING_TIME_SECS = 10*60; // How long it takes for the WW to settle again.
+        const PERTUBATION_CORRECTION = 2.0; // Max Correction in °C for full pertubation.
+        let ww_start_ts = this.semp_client.getWarmWaterStartTimeStamp();
+        let ww_stop_ts = this.semp_client.getWarmWaterStopTimeStamp();
+
+        if(isNowInTimePeriod(ww_stop_ts, PERTUBATION_SETTLING_TIME_SECS * 1000)) {
+            let settling_time_fraction = (Date.now() - ww_stop_ts)/(PERTUBATION_SETTLING_TIME_SECS * 1000);
+            return (1 - settling_time_fraction) * PERTUBATION_CORRECTION;
+        } else if(isNowInTimePeriod(ww_start_ts, PERTUBATION_TIME_SECS * 1000)) {
+            let pertubation_time_fraction = (Date.now() - this.semp_client.getWarmWaterStartTimeStamp())/(PERTUBATION_TIME_SECS * 1000);
+            return pertubation_time_fraction * PERTUBATION_CORRECTION;
+        } else if(this.isWarmWaterOn()) {
+            return PERTUBATION_CORRECTION; // Pertubation has reached full extend - full pertubation.
+        } else {
+            return 0; // Default case while WW is off - no pertubation.
+        }
+    }
 
     controlWarmWaterPassive(max_available_power) { this.controlWarmWater(0, max_available_power); }
     controlWarmWater(min_available_power, max_available_power) {
@@ -357,17 +447,19 @@ class HeatPump {
     calculateModulatedHeatingPower(min_available_power, max_available_power) {
         if(this.isInSummerMode()) { return 0; }
         
-        const BASE_TARGET_TEMP_INFLUENCE = 150;
+        const BASE_TARGET_TEMP_INFLUENCE = 200;
         const MAX_TEMPERATURE_OVERSHOOT = 10;
         let min_power = this.getMinHeatingPower();
         let cur_power = this.semp_client.getHeatingPower(); 
-        let temperature_overshoot = this.getHeatingBufferTemp() - this.getTargetHeatingBufferTemp();
+        let temperature_overshoot = this.getHeatingBufferTempOvershoot();
 
         let desired_power = min_available_power; 
         let power_diff = desired_power - cur_power;
         
-        // 10° overshoot makes available power ignored.
-        let availability_factor = temperature_overshoot > 0 ? Math.min(1 - (temperature_overshoot / MAX_TEMPERATURE_OVERSHOOT), 1) : 1; 
+        let availability_factor = 1;
+        if(temperature_overshoot > 0 && power_diff > 0) { // 10° overshoot makes surplus available power ignored.
+            availability_factor = Math.min(1 - (temperature_overshoot / MAX_TEMPERATURE_OVERSHOOT), 1);
+        }
         this.modulation_availability_offset = power_diff * availability_factor;
 
         // Scale down the influence of temperature overshoot with the loss in efficiency while keeping upward temperature correction strong
@@ -383,12 +475,14 @@ class HeatPump {
         let modulated_power = Math.min(cur_power + this.modulation_availability_offset + this.modulation_temp_offset, desired_power);
         let recommended_power = Math.max(modulated_power, min_power);
 
+        
+        let turn_off_tolerance = this.isOn() ? max_available_power - min_available_power : 0;  // Do not immediately turn off if modulated power dips below zero.
         if(this.isInOverpoweredRegime(this.getTargetHeatingBufferTemp()) && 
-                this.isHeatingOn() && temperature_overshoot < MAX_TEMPERATURE_OVERSHOOT) {
+                this.isHeatingOn() && this.modulation_temp_offset + cur_power > 0 && temperature_overshoot < MAX_TEMPERATURE_OVERSHOOT) {
             // Always recommend minimum power if the heating energy requirements of the house are below
             // the minimum power requirements.
             recommended_power = min_power;
-        } else if(modulated_power < 0) {
+        } else if(modulated_power + turn_off_tolerance < 0) {
             recommended_power = 0;   // Floor at 0 (= OFF)
         } else if(!this.isOn() && temperature_overshoot >= 0) {
             recommended_power = 0;   // Do not turn on if already above target temperature
@@ -403,15 +497,21 @@ class HeatPump {
         this.modulation_temp_offset = 0;
     }
 
+    controlPassiveHeating() {
+        if(this.semp_client.getRequestedHeatingPower() > 0) {
+            if(this.semp_client.requestHeating(0, true)) {
+                console.log("Requested Heating OFF because of canceling previous request after becoming PASSIVE.");
+            }
+        }
+    }
+
     controlModulatedHeating(min_available_power, max_available_power) {
         let modulated_heating_power = this.calculateModulatedHeatingPower(min_available_power, max_available_power); 
         this.controlHeating(min_available_power, modulated_heating_power, modulated_heating_power);
     }
 
     controlEfficientHeating(min_available_power, max_available_power) {
-        const HEATING_BUFFER_HYSTERESIS = 5; // Go max 5°C above target temperature
-        const LOWEST_HEATING_BUFFER_MAX = 32; // But at least 32°C
-        this.setHeatingBufferMax(Math.max(this.getTargetHeatingBufferTemp() + HEATING_BUFFER_HYSTERESIS, LOWEST_HEATING_BUFFER_MAX));
+        this.setHeatingBufferMax(this.calculateEfficientHeatingBufferMax());
         let recommended_power =  Math.max(this.getMinHeatingPower(), Math.min(min_available_power, this.required_equilibrium_heating_power));
         this.controlHeating(min_available_power, max_available_power, recommended_power);
         this.resetModulationOffsets();
@@ -424,10 +524,27 @@ class HeatPump {
         this.resetModulationOffsets();
     }
 
+    monitorCompressorStarts() {
+        let prev_compressor_starts = this.compressor_starts;
+        this.compressor_starts = getStateIfExisting(this.compressor_starts_obj, this.compressor_starts);
+        if(prev_compressor_starts != 0 && this.compressor_starts > prev_compressor_starts) {
+            updateDailyStat(this.COMPRESSOR_STARTS, 1);
+            console.log("HP: Compressor START");
+        }
+
+        let prev_compressor_starts_defrost = this.compressor_starts_defrost;
+        this.compressor_starts_defrost = getStateIfExisting(this.compressor_starts_defrost_obj, this.compressor_starts_defrost);
+        if(prev_compressor_starts_defrost != 0 && this.compressor_starts_defrost > prev_compressor_starts_defrost) {
+            updateDailyStat(this.COMPRESSOR_STARTS_DEFROST, 1);
+            console.log("HP: Compressor DEFROST START");
+        }
+    }
+
     updateState() {
         this.semp_client.updateState();
-        this.warmwater_expected_power = this.estimateExpectedWarmWaterPowerAtTemp(this.boiler.getTemperature());
+        this.warmwater_expected_power = this.estimateExpectedWarmWaterPowerAtTemp(this.getWarmWaterTemp());
         this.heating_expected_power = this.estimateExpectedHeatingPower(this.getHeatingBufferTemp());
+        this.monitorCompressorStarts();
 
         if(this.isInSummerMode()) {
             this.warmwater_output_power = 1000 * getStateIfExisting(this.ww_output_power_kw_summer_obj, this.warmwater_output_power);
@@ -439,24 +556,28 @@ class HeatPump {
         this.required_heating_runtime = this.estimateHeatingRunMinsRequired(this.getHeatingBufferMax()); 
         this.required_equilibrium_heating_power = this.estimateEquilibriumHeatingPower(this.getTargetHeatingBufferTemp());
 
-
         accumulateDailyEnergyStat(this.DAY_HEATING_ENERGY_OBJ, this.semp_client.getHeatingPower());
         accumulateDailyEnergyStat(this.DAY_WARMWATER_ENERGY_OBJ, this.semp_client.getWarmWaterPower());
 
-        this.hk2_pump_on = getStateIfExisting(this.hk2_pump_obj, false);
-        setState(this.HK2_PUMP_OBJ, this.hk2_pump_on, true);
-        this.hk3_pump_on = getStateIfExisting(this.hk3_pump_obj, false);
-        setState(this.HK3_PUMP_OBJ, this.hk3_pump_on, true);
         let efficiency_factor = this.estimateCurrentHeatPumpEfficiencyFactor();
         setState(this.EFFICIENCY_FACTOR, efficiency_factor, true);
         setState(this.ESTIMATED_WARMWATER_POWER, this.warmwater_expected_power, true);
+        setState(this.EMI_MODE, this.getEmiMode(), true);
 
-        setState(this.MODULATION_RECOMMENDED, this.modulation_recommended, true);
-        setState(this.MODULATION_OFFSET_AVAILABILITY, this.modulation_availability_offset, true);
-        setState(this.MODULATION_OFFSET_TEMPERATURE, this.modulation_temp_offset, true);
-        setState(this.EQUILIBRIUM_HEATING_POWER, this.required_equilibrium_heating_power, true);
-        setState(this.HEATING_BUFFER_MAX_TEMP, this.heating_buffer_max, true);
+        if(!this.isInSummerMode()) {
+            this.hk2_pump_on = getStateIfExisting(this.hk2_pump_obj, false);
+            setState(this.HK2_PUMP_OBJ, this.hk2_pump_on, true);
+            this.hk3_pump_on = getStateIfExisting(this.hk3_pump_obj, false);
+            setState(this.HK3_PUMP_OBJ, this.hk3_pump_on, true);
 
+            setState(this.MODULATION_RECOMMENDED, this.modulation_recommended, true);
+            setState(this.MODULATION_OFFSET_AVAILABILITY, this.modulation_availability_offset, true);
+            setState(this.MODULATION_OFFSET_TEMPERATURE, this.modulation_temp_offset, true);
+            setState(this.EQUILIBRIUM_HEATING_POWER, this.required_equilibrium_heating_power, true);
+            setState(this.HEATING_BUFFER_TEMP, this.getHeatingBufferTemp(), true);
+            setState(this.HEATING_BUFFER_MAX_TEMP, this.heating_buffer_max, true);
+            setState(this.HEATING_BUFFER_TEMP_OVER, this.getHeatingBufferTempOvershoot(), true);
+        }
         this.semp_client.writeState();
     }
 }
