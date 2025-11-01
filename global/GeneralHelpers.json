@@ -90,3 +90,31 @@ function historizeDailyStatValue(obj, value) {
         }
     );
 }
+
+class SignalDebouncer {
+    constructor(initial_value, slack) {
+        this.value = initial_value;
+        this.last_value = initial_value;
+        this.slack = slack;
+    }
+    updateValue(value) {
+        this.last_value = value;
+        if(Math.abs(value - this.value) >= this.slack) {
+            this.value = value;
+        }
+    }
+    debounced() { return this.value; }
+    raw() { return this.last_value; }
+}
+
+class StateSignalDebouncer extends SignalDebouncer {
+    constructor(initial_value, slack, obj) {
+        super(initial_value, slack);
+        this.obj = obj;
+    }
+
+    update() {
+        let value = getStateIfExisting(this.obj, this.last_value);
+        super.updateValue(value);
+    }
+}

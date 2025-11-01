@@ -27,6 +27,7 @@ class PVForecast {
 
         this.cur_forecast = undefined;
         this.peak_time = undefined; 
+        this.is_night = undefined;
 
         // Primary lookback buffer for per-second measurements until next update interval
         this.power_measurement_lookback = new RingBuffer(this.update_interval_ms/1000); 
@@ -214,11 +215,20 @@ class PVForecast {
         );
     }
 
+    processDayNightSwitch() {
+        let is_night = this.isNight();
+        if(is_night != this.is_night) {
+            let mode = is_night ? "NIGHT" : "DAY";
+            console.log("Solar Forecast " + mode + " has started.");
+            this.is_night = is_night;
+        }
+    }
     process() {
         this.aggregateMeasurements();
 
         let now = new Date();
         this.cur_forecast = this.getForecastRange(now);
+        this.processDayNightSwitch();
     }
 
     historize() {

@@ -37,7 +37,7 @@ let boiler = new ControllableBoiler(SCRIPT_ID, 'Boiler');
 let heater = new ControllableHeater(SCRIPT_ID, 'CellarHeater');
 
 let heatpump = new HeatPump(SCRIPT_ID, boiler);
-let heatpump_ww_mgr = new HeatPumpWWManager(SCRIPT_ID, heatpump, pv_forecast);
+let heatpump_ww_mgr = new HeatPumpWWManager(SCRIPT_ID, heatpump, boiler, pv_forecast);
 let heatpump_heat_mgr = new HeatPumpHeatManager(SCRIPT_ID, heatpump, pv_forecast);
 
 function getRecentStateVal(obj) {

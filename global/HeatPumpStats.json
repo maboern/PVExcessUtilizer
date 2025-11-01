@@ -1,0 +1,126 @@
+/* -- do not edit following lines - START --
+{
+  "expert": true,
+  "debug": false,
+  "verbose": false
+}
+-- do not edit previous lines - END --*/
+class HeatPumpStats {
+    constructor(root_obj, semp_client) {
+        this.root_obj = root_obj;
+        this.semp_client = semp_client;
+
+        this.heating_buffer_temperature_corr = 4; // The HK mixers are less than half-open if the heating buffer sensor reports hitting the required temperature. 
+        
+        this.ambient_temp = new StateSignalDebouncer(10, 0.5, 'stiebel-isg.0.info.ANLAGE.HEIZUNG.AUSSENTEMPERATUR');
+        this.ww_temp = new SignalDebouncer(45, 0.1);
+        this.hk2_room_temp = new StateSignalDebouncer(21, 0.1, 'stiebel-isg.0.info.ANLAGE.RAUMTEMPERATUR.ISTTEMPERATUR_2');
+        this.hk3_room_temp = new StateSignalDebouncer(22, 0.1, 'stiebel-isg.0.info.ANLAGE.RAUMTEMPERATUR.ISTTEMPERATUR_3');
+        this.heating_buffer_temp = new StateSignalDebouncer(30, 0.5, 'stiebel-isg.0.info.ANLAGE.HEIZUNG.PUFFERISTTEMPERATUR');
+
+        this.hk2_target_temp = new StateSignalDebouncer(30, 0.5, 'stiebel-isg.0.info.ANLAGE.HEIZUNG.SOLLTEMPERATUR_HK_2');
+        this.hk3_target_temp = new StateSignalDebouncer(30, 0.5, 'stiebel-isg.0.info.ANLAGE.HEIZUNG.SOLLTEMPERATUR_HK_3');
+        
+        this.compressor_starts = 0;
+        this.compressor_starts_defrost = 0;
+
+        this.HK2_PUMP_OBJ = this.root_obj + ".hk2_pump";
+        createState(this.HK2_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK2", type: "boolean", def: false});
+        this.HK3_PUMP_OBJ = this.root_obj + ".hk3_pump";
+        createState(this.HK3_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK3", type: "boolean", def: false});
+        this.HK2_MIXER_MOVE_OBJ = this.root_obj + ".hk2_mixer_move";
+        createState(this.HK2_MIXER_MOVE_OBJ, 0, {read: true, write: false, name: "Mixer Movement HK2", type: "number", def: 0});
+        this.HK3_MIXER_MOVE_OBJ = this.root_obj + ".hk3_mixer_move";
+        createState(this.HK3_MIXER_MOVE_OBJ, 0, {read: true, write: false, name: "Mixer Movement HK3", type: "number", def: 0});
+        this.COMPRESSOR_STARTS = this.root_obj + ".compressor_starts";
+        createState(this.COMPRESSOR_STARTS, 0, {read: true, write: false, name: "Heatpump Compressor Starts", type: "number", def: 0});
+        this.COMPRESSOR_STARTS_DEFROST = this.root_obj + ".compressor_starts_defrost";
+        createState(this.COMPRESSOR_STARTS_DEFROST, 0, {read: true, write: false, name: "Heatpump Compressor Starts (Defrosting)", type: "number", def: 0});
+    }
+
+    getAmbientTemp() { return this.ambient_temp.debounced(); }
+    getWarmWaterTemp() { return this.ww_temp.debounced(); }
+    getRoomTempHk2() { return this.hk2_room_temp.debounced(); }
+    getRoomTempHk3() { return this.hk3_room_temp.debounced(); }
+    getTargetTempHk2() { return this.hk2_target_temp.debounced(); }
+    getTargetTempHk3() { return this.hk3_target_temp.debounced(); }
+    getRawHeatingBufferTemp() { return this.heating_buffer_temp.debounced(); }
+    getHeatingBufferTemp() { return this.getRawHeatingBufferTemp() + this.heating_buffer_temperature_corr; }
+
+    isInSummerMode() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.BETRIEBSSTATUS.SOMMERBETRIEB', false);  }
+    isHk2PumpOn() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.HEIZKREISPUMPE_2', false); }
+    isHk3PumpOn() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.HEIZKREISPUMPE_3', false); }
+    areHeatingCirculationPumpsOn() { return this.isHk2PumpOn() || this.isHk3PumpOn(); }
+    isHk2MixerOpening() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.MISCHER_AUF_HEIZKREIS_2', false); }
+    isHk2MixerClosing() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.MISCHER_ZU_HEIZKREIS_2', false); }
+    isHk3MixerOpening() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.MISCHER_AUF_HEIZKREIS_3', false); }
+    isHk3MixerClosing() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.MISCHER_ZU_HEIZKREIS_3', false); }
+
+    monitorCompressorStarts() {
+        let prev_compressor_starts = this.compressor_starts;
+        this.compressor_starts = getStateIfExisting('stiebel-isg.0.info.WAERMEPUMPE.STARTS.VERDICHTER', this.compressor_starts);
+        if(prev_compressor_starts != 0 && this.compressor_starts > prev_compressor_starts) {
+            updateDailyStat(this.COMPRESSOR_STARTS, 1);
+            console.log("HP: Compressor START");
+        }
+
+        let prev_compressor_starts_defrost = this.compressor_starts_defrost;
+        this.compressor_starts_defrost = getStateIfExisting('stiebel-isg.0.info.WAERMEPUMPE.LAUFZEIT.STARTS_ABTAUEN', this.compressor_starts_defrost);
+        if(prev_compressor_starts_defrost != 0 && this.compressor_starts_defrost > prev_compressor_starts_defrost) {
+            updateDailyStat(this.COMPRESSOR_STARTS_DEFROST, 1);
+            console.log("HP: Compressor DEFROST START");
+        }
+    }
+
+    trackHkMixerMovements() {
+        let hk2_movement = this.isHk2MixerOpening() ? 1 : (this.isHk2MixerClosing() ? -1 : 0);
+        let hk3_movement = this.isHk3MixerOpening() ? 1 : (this.isHk3MixerClosing() ? -1 : 0);
+        setState(this.HK2_MIXER_MOVE_OBJ, hk2_movement, true);
+        setState(this.HK3_MIXER_MOVE_OBJ, hk3_movement, true);
+    }
+
+    calculateWarmWaterPertubationCorrection() {
+        const PERTUBATION_TIME_SECS = 7*60; // How long it takes for the WW to be fully pertubed.
+        const PERTUBATION_SETTLING_TIME_SECS = 10*60; // How long it takes for the WW to settle again.
+        const PERTUBATION_CORRECTION = 2.0; // Max Correction in °C for full pertubation.
+        let ww_start_ts = this.semp_client.getWarmWaterStartTimeStamp();
+        let ww_stop_ts = this.semp_client.getWarmWaterStopTimeStamp();
+
+        if(isNowInTimePeriod(ww_stop_ts, PERTUBATION_SETTLING_TIME_SECS * 1000)) {
+            let settling_time_fraction = (Date.now() - ww_stop_ts)/(PERTUBATION_SETTLING_TIME_SECS * 1000);
+            return (1 - settling_time_fraction) * PERTUBATION_CORRECTION;
+        } else if(isNowInTimePeriod(ww_start_ts, PERTUBATION_TIME_SECS * 1000)) {
+            let pertubation_time_fraction = (Date.now() - this.semp_client.getWarmWaterStartTimeStamp())/(PERTUBATION_TIME_SECS * 1000);
+            return pertubation_time_fraction * PERTUBATION_CORRECTION;
+        } else if(this.semp_client.isWarmWaterOn()) {
+            return PERTUBATION_CORRECTION; // Pertubation has reached full extent - full pertubation.
+        } else {
+            return 0; // Default case while WW is off - no pertubation.
+        }
+    }
+
+    updateCorrectedWarmWaterTemp() {
+        let raw_ww_temp = getStateIfExisting('stiebel-isg.0.info.ANLAGE.WARMWASSER.ISTTEMPERATUR', this.getWarmWaterTemp());
+        let corrected_ww_temp = raw_ww_temp + this.calculateWarmWaterPertubationCorrection();
+        this.ww_temp.updateValue(corrected_ww_temp);
+    }
+    
+    updateState() {
+        this.monitorCompressorStarts();
+        this.updateCorrectedWarmWaterTemp();
+
+        this.ambient_temp.update();
+        this.hk2_room_temp.update();
+        this.hk3_room_temp.update();
+        this.heating_buffer_temp.update();
+        this.hk2_target_temp.update();
+        this.hk3_target_temp.update();
+
+        if(!this.isInSummerMode()) {
+            setState(this.HK2_PUMP_OBJ, this.isHk2PumpOn(), true);
+            setState(this.HK3_PUMP_OBJ, this.isHk3PumpOn(), true);
+            
+            this.trackHkMixerMovements();
+        }
+    }
+}

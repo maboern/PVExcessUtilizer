@@ -5,6 +5,15 @@
   "verbose": false
 }
 -- do not edit previous lines - END --*/
+const HEATPUMP_OPERATING_MODE = Object.freeze({
+    EMERGENCY : 0, // Notbetrieb
+    STANDBY : 1,  // Bereitschaftsbetrieb
+    PROGRAM : 2, // Programmbetrieb
+    COMFORT: 3,  // Komfortbetrieb
+    ECO : 4,  // Ecobetrieb
+    WARMWATER_ONLY : 5 // Warmwasserbetrieb
+});
+
 const HEATPUMP_MODE = Object.freeze({
     PASSIVE : "PASSIVE",     // Do not actively start the heatpump
     EFFICIENT : "EFFICIENT",  // Lowest power possible for heatpump to be most efficient.
