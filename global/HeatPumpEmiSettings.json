@@ -101,7 +101,7 @@ class HeatPumpEmiSettings {
     }
     setEfficientValues() {
         this.emi_on = 1;
-        this.warmwater_temp = 48;
+        this.warmwater_temp = 45;
         this.heating_buffer_temp = 38;
         this.settings = HEATPUMP_EMI_SETTINGS.EFFICIENT;
     }

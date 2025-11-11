@@ -14,12 +14,33 @@ const HEATPUMP_OPERATING_MODE = Object.freeze({
     WARMWATER_ONLY : 5 // Warmwasserbetrieb
 });
 
+class HeatPumpOperatingMode {
+    static toString(mode) {
+        switch(mode) {
+            case HEATPUMP_OPERATING_MODE.EMERGENCY:
+                return "EMERGENCY";
+            case HEATPUMP_OPERATING_MODE.STANDBY:
+                return "STANDBY";
+            case HEATPUMP_OPERATING_MODE.PROGRAM:
+                return "PROGRAM (Default)";
+            case HEATPUMP_OPERATING_MODE.COMFORT:
+                return "COMFORT";
+            case HEATPUMP_OPERATING_MODE.ECO:
+                return "ECO";
+            case HEATPUMP_OPERATING_MODE.WARMWATER_ONLY:
+                return "WARMWATER_ONLY";
+            default:
+                return "UNKNOWN";
+        }
+    }
+}
+
 const HEATPUMP_MODE = Object.freeze({
     PASSIVE : "PASSIVE",     // Do not actively start the heatpump
     EFFICIENT : "EFFICIENT",  // Lowest power possible for heatpump to be most efficient.
     MODULATED : "MODULATED", // Modulate heatpump power to follow available solar surplus
     BUFFERING : "BUFFERING", // Try to fill buffers as fast as possible with available surplus energy.
-    EFFICIENT_BUFFERING : "EFFICIENT BUFFERING", // Same as Buffering, but keep heatpump lower in an efficient regime
+    WARMUP : "WARMUP", // Warm up the rooms and buffer efficiently towards target temperature
 });
 
 class HeatPumpMode 
@@ -29,7 +50,7 @@ class HeatPumpMode
             case HEATPUMP_MODE.PASSIVE:            
             case HEATPUMP_MODE.EFFICIENT:
                 return EFFICIENT_HEATPUMP_EMI_SETTINGS;
-            case HEATPUMP_MODE.EFFICIENT_BUFFERING:
+            case HEATPUMP_MODE.WARMUP:
                 return DEFAULT_HEATPUMP_EMI_SETTINGS;
             case HEATPUMP_MODE.BUFFERING:
             case HEATPUMP_MODE.MODULATED:

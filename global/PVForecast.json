@@ -28,18 +28,25 @@ class PVForecast {
         this.cur_forecast = undefined;
         this.peak_time = undefined; 
         this.is_night = undefined;
+        this.fog_thickness = 0;
 
         // Primary lookback buffer for per-second measurements until next update interval
         this.power_measurement_lookback = new RingBuffer(this.update_interval_ms/1000); 
         // Second aggregation of update interval average buckets to 1 hour
-        this.power_measurement_bucket_loockback = new RingBuffer(60*60*1000/this.update_interval_ms);
+        this.power_measurement_bucket_interval = 60*60*1000;
+        this.power_measurement_bucket_avg = new RingBuffer(this.power_measurement_bucket_interval/this.update_interval_ms);
+        this.power_measurement_bucket_max = new RingBuffer(this.power_measurement_bucket_interval/this.update_interval_ms);
 
+        this.FORECAST_CUR_WATTS_CORR_OBJ = this.root_obj + ".power_now_corrected";
+        createState(this.FORECAST_CUR_WATTS_CORR_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentPowerCorrected", type: "number", unit: "W", def: 0});
         this.FORECAST_CUR_WATTS_OBJ = this.root_obj + ".power_now";
         createState(this.FORECAST_CUR_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentPower", type: "number", unit: "W", def: 0});
         this.FORECAST_CUR_MIN_WATTS_OBJ = this.root_obj + ".min_power_now";
         createState(this.FORECAST_CUR_MIN_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentMinPower", type: "number", unit: "W", def: 0});
         this.FORECAST_CUR_MAX_WATTS_OBJ = this.root_obj + ".max_power_now";
         createState(this.FORECAST_CUR_MAX_WATTS_OBJ, 0, {read: true, write: false, name: "pvForecastCurrentMaxPower", type: "number", unit: "W", def: 0});
+        this.FORECAST_FOG_THICKNESS_OBJ = this.root_obj + ".fog";
+        createState(this.FORECAST_FOG_THICKNESS_OBJ, 0, {read: true, write: false, name: "Forecast Fog Thickness", type: "number", unit: "%", def: 0});
         this.FORECAST_SOLCAST_API_KEY = this.root_obj + ".api_key";
         createState(this.FORECAST_SOLCAST_API_KEY, "", {read: true, write: true, name: "Solcast API Key", type: "string", def: ""});
         this.FORECAST_SOLCAST_SITE_ID = this.root_obj + ".site_id";
@@ -62,11 +69,14 @@ class PVForecast {
         this.api_data = getState(this.FORECAST_SOLCAST_DATA).val;
         this.api_data_ts = getState(this.FORECAST_SOLCAST_DATA).ts;
 
+        this.fog_thickness = getStateIfExistingWithMaxAge(this.FORECAST_FOG_THICKNESS_OBJ, 30*60, 0)/100;
+
         this.restoreFromHistory();
         this.parseApiData(this.api_data);
     }
 
     getUpdateIntervalMs() { return this.update_interval_ms; }
+    getBasePowerReserve() { return this.base_power_reserve; }
 
     estimateRemainingExcessToday(expected_load_power) {
         return this.estimateRemainingToday(expected_load_power, this.excess_power_threshold, this.ondemand_power_reserve);
@@ -103,6 +113,7 @@ class PVForecast {
     getPeakTime() { if(this.peak_time === undefined) {this.findPeakTime();} return this.peak_time; }
     getPeakPower(peak_time) { return this.getForecast(peak_time); }
     getSecondsAfterPeakTime() { return (Date.now() - this.getPeakTime().getTime())/1000; }
+    isAfterPeak() { return this.getSecondsAfterPeakTime() > 0; }
     findPeakTime() {
         var datetime = new Date(new Date().setHours(5, 0, 0, 0));
         
@@ -134,9 +145,29 @@ class PVForecast {
     }
 
 
-    isNight() { return this.getForecast(new Date()) == 0; }
+    isNight() { return this.isNightAt(new Date())}
+    isNightAt(datetime) {return this.getForecast(datetime) == 0; }
+    isLowerThan(lower_threshold) {  return this.getForecastRange(new Date()).getUpper() < lower_threshold; }
+    isDawn(lower_threshold) {
+        let earlier = addMinutes(new Date(), -2*60);
+        return this.isNightAt(earlier) && this.isLowerThan(lower_threshold) && !this.isAfterPeak();
+    }
+    isDusk(lower_threshold) {
+        let later = addMinutes(new Date(), 2*60);
+        return this.isNightAt(later) && this.isLowerThan(lower_threshold) && this.isAfterPeak();
+    }
     getForecast(datetime) { return this.getForecastRange(datetime).getEstimate(); }
     getForecastRange(datetime) {
+        let fog_correction = 1;
+        let time_to_forecast = datetime.getTime() - Date.now();
+        if(time_to_forecast >= 0) {
+            let fading_time = (1 + (5 * this.fog_thickness))*60*60*1000;
+            let fading = Math.max(1 - (time_to_forecast/fading_time), 0);
+            fog_correction = 1 - (this.fog_thickness * fading);
+        }
+        return this.getUncorrectedForecastRange(datetime).multiply(fog_correction);
+    }
+    getUncorrectedForecastRange(datetime) {
         let hour = datetime.getHours();
         if(hour < 5 || hour >= 21) {
             // No solar power outside of forecast hours
@@ -167,12 +198,37 @@ class PVForecast {
     }
 
     aggregateMeasurements() {
-        let interval_power_avg = this.power_measurement_lookback.avg();
-        this.power_measurement_bucket_loockback.push(interval_power_avg);
+        this.power_measurement_bucket_avg.push(this.power_measurement_lookback.avg());
+        this.power_measurement_bucket_max.push(this.power_measurement_lookback.percentile(90));
     }
+    getLastHourAverageMeasuredPower() { return this.power_measurement_bucket_avg.avg(); }
+    getLastHourMaxMeasuredPower() { return this.power_measurement_bucket_max.max(); }
+    updateFogCorrection() {
+        // Check if in the last hour, the max measurement was ever higher than the lower forecast range.
+        // If not, assume there is fog / snow whatever. The fog thickness corresponds to the ratio
+        // between the (max) measured values and the forecast estimate.
+        let count = this.power_measurement_bucket_max.getCount();
+        if(count == 0) { return; }
 
-    getLastHourAverageMeasuredPower() { 
-        return this.power_measurement_bucket_loockback.avg();
+        let time_step = this.update_interval_ms/(60*1000)
+        let time = addMinutes(new Date(), -1*time_step/2);
+        let measured_max = this.power_measurement_bucket_max.linearize().slice(-1*count);
+        let fog_thickness = 0;
+        for (const measurement of measured_max) {
+            time = addMinutes(time, -1*time_step);
+            let forecast = this.getForecastRange(time);
+            if(measurement >= forecast.getLower()) {
+                if(this.fog_thickness == 0 || measurement > forecast.getEstimate() || forecast.getLower() == 0) {
+                    // Maximum measured is higher than minimum forecast => assume still no fog
+                    this.fog_thickness = 0;
+                    return;
+                }
+            } 
+            let fog = 1 - measurement / forecast.getEstimate();
+            fog_thickness = smooth(fog_thickness, fog, 0.3);
+        }
+        this.fog_thickness = Math.max(fog_thickness, 0);
+        console.log("Detected Fog Thickness: " + Math.round(this.fog_thickness*100) + "%")
     }
 
     parseApiData(json) {
@@ -219,15 +275,17 @@ class PVForecast {
         let is_night = this.isNight();
         if(is_night != this.is_night) {
             let mode = is_night ? "NIGHT" : "DAY";
-            console.log("Solar Forecast " + mode + " has started.");
+            console.log("Solar Forecast " + mode + ".");
             this.is_night = is_night;
         }
     }
     process() {
         this.aggregateMeasurements();
+        this.updateFogCorrection();
+        setState(this.FORECAST_FOG_THICKNESS_OBJ, Math.round(this.fog_thickness*100), true);
 
-        let now = new Date();
-        this.cur_forecast = this.getForecastRange(now);
+        this.cur_forecast = this.getForecastRange(new Date());
+        setState(this.FORECAST_CUR_WATTS_CORR_OBJ, this.cur_forecast.getEstimate(), true);
         this.processDayNightSwitch();
     }
 

@@ -73,7 +73,8 @@ class HeatPumpSempClient {
         createState(this.HEATING_CONTROLLABLE_OBJ, false, {read: true, write: false, name: "HeatingControllable", type: "boolean", def: false});
         this.REQ_HEATING_POWER_OBJ = this.root_obj + ".requested_heating_power";
         createState(this.REQ_HEATING_POWER_OBJ, 0, {read: true, write: false, name: "Requested Heating Power", type: "number", unit: "W", def: 0});
-
+        this.HEATING_PLAN_OBJ = this.root_obj + ".heating_plan";
+        createState(this.HEATING_PLAN_OBJ, 0, {read: true, write: false, name: "Heating Plan MaxPower", type: "number", unit: "W", def: 0});
     }
 
     isWarmWaterControllable() { return this.warmwater_controllable; }
@@ -90,9 +91,11 @@ class HeatPumpSempClient {
     getHeatingStartTimeStamp() { return this.heating_started_ts; }
     getHeatingStopTimeStamp() { return this.heating_stopped_ts; }
     getHeatingPower() { return this.heating_power; }
-    getHeatingMinPower() { return this.heating_plan ? this.heating_plan_min_power : this.heating_min_power; }
+    getHeatingMinPower() { return this.heating_plan ? this.heating_plan_min_power : this.heating_min_power; } 
     getHeatingMaxPower() { return this.heating_plan ? this.heating_plan_max_power : this.heating_max_power; }
     getRequestedHeatingPower() { return this.isLastHeatingRequestStillValid() ? this.last_heating_request_power : 0;}
+    isHeatingPlanActive() { return this.heating_plan && this.heating_plan_earliest_start == 0; }
+    getHeatingPlanString() { return "Heating Plan: t=" + this.heating_plan_earliest_start + " -> " + this.heating_plan_latest_end + ", P=" + this.heating_plan_min_power + "W - " + this.heating_plan_max_power + "W, E=" + this.heating_plan_min_energy + "Wh - " + this.heating_plan_max_energy + "Wh"; }
 
     processWarmWaterStatusUpdate(status) {
         let warmwater_was_on = this.warmwater_on;
@@ -321,6 +324,7 @@ class HeatPumpSempClient {
         setState(this.WARMWATER_POWER_OBJ, this.warmwater_power, true);
         setState(this.HEATING_CONTROLLABLE_OBJ, this.heating_controllable, true);
         setState(this.HEATING_POWER_OBJ, this.heating_power, true);
+        setState(this.HEATING_PLAN_OBJ, this.isHeatingPlanActive() ? this.heating_plan_max_power : 0, true);
     }
 }
 

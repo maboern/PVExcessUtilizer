@@ -146,7 +146,7 @@ class HeatPumpWWManager {
 
     mustStartWarmWaterSurplusBufferingNow() {   
         let now = new Date();
-        let peak_soon = this.pv_forecast.getSecondsAfterPeakTime() > -30*60; // Forecasted peak within the next 45 Minutes
+        let peak_soon = this.pv_forecast.getSecondsAfterPeakTime() > -30*60; // Forecasted peak within the next 30 Minutes
         let after_peak = this.pv_forecast.getSecondsAfterPeakTime() > 0;
         let time_to_start = (peak_soon || after_peak) && !this.checkSurplusOnlyFeasible();
         let latest_time_to_start = now.getHours() >= this.surplus_buffering_latest_start_hours;
@@ -199,13 +199,20 @@ class HeatPumpWWManager {
                                                                 this.heatpump.getExpectedWarmWaterPower(), 2);
         return is_allowed_to_start && enough_power_now && enough_power_soon && !this.isWarmWaterBufferingComplete(); 
     }
-    canContinueWarmWaterBuffering(max_power) {
+    canContinueExcessWarmWaterBuffering(max_power) {
         let is_ww_on = this.heatpump.isWarmWaterOn(); 
+        let can_continue = max_power >= this.heatpump.getExpectedWarmWaterPower();
+        return is_ww_on && can_continue;
+    }
+    canContinueEfficientWarmWaterBuffering(max_power) {
         let is_heating_finishing = this.heatpump.isHeatingOn() && this.heatpump.isHeatingBufferTempAtEfficientMax();
         let is_allowed_to_start = this.heatpump.isWarmWaterAllowedToStart();
-        let can_continue = max_power >= this.heatpump.getExpectedWarmWaterPower();
-        let can_continue_after_heating = is_heating_finishing && is_allowed_to_start && can_continue;
-        return (is_ww_on || can_continue_after_heating) && can_continue;
+        let enough_power = max_power >= this.heatpump.getExpectedWarmWaterPower();
+        let can_start_after_heating = is_heating_finishing && is_allowed_to_start;
+        let efficient_temp_reached = this.stats.getWarmWaterTemp() >= EFFICIENT_HEATPUMP_EMI_SETTINGS.getWarmWaterTemp();
+        let may_continue_inefficient = this.mayContinueWarmWaterBuffering();
+        let can_continue = !efficient_temp_reached || may_continue_inefficient;
+        return (can_continue || can_start_after_heating) && enough_power;
     }
     mayContinueWarmWaterBuffering() {
         // In order to minimize the number of compressor starts in summer, keep the heatpump
@@ -228,7 +235,12 @@ class HeatPumpWWManager {
             // In the morning, allow to get the temperature lower causing a potential second run in the afternoon
             low_temp_threshold -= this.heatpump.getWarmWaterHysteresis() - WW_HYSTERESIS_FUDGE;
         }
-        return this.stats.getWarmWaterTemp() <= low_temp_threshold;
+        if(!this.stats.isInSummerMode() && this.strategy == HEATPUMP_STRATEGY.GREEDY) {
+            // In greedy mode, we anyway do not want to buffer above COMFORT
+            return false;
+        } else {
+            return this.stats.getWarmWaterTemp() <= low_temp_threshold;
+        }
     }
     doStartOpportunisticWarmWaterSurplusBuffering(min_surplus_power) {
         const POWER_RESERVE_FACTOR = 2;
@@ -240,7 +252,7 @@ class HeatPumpWWManager {
     }
 
    controlStrategyGreedyWarmWater(surplus, excess) {
-        let evening_boost = this.calculateWarmWaterEveningBoost();
+        let evening_boost = 0; //this.calculateWarmWaterEveningBoost();
         let min_surplus_power = surplus.tail(60).percentile(20) + evening_boost; 
         let max_surplus_power = Math.max(surplus.percentile(75), min_surplus_power) + evening_boost;
 
@@ -248,7 +260,7 @@ class HeatPumpWWManager {
             this.setWarmWaterMode(HEATPUMP_MODE.PASSIVE, "warmwater buffering complete");
             this.heatpump.controlWarmWaterPassive(max_surplus_power);
         } else if(this.doStartOpportunisticWarmWaterSurplusBuffering(min_surplus_power) || 
-           this.canContinueWarmWaterBuffering(max_surplus_power)) {
+           this.canContinueEfficientWarmWaterBuffering(max_surplus_power)) {
             // Opportunistic Buffering if there is surplus. To avoid unnecessary heatpump starts,
             // do not stop once there is no more surplus but instead eat partially into grid energy.
             this.setWarmWaterMode(HEATPUMP_MODE.BUFFERING, "opportunistic Surplus Buffering" + ((evening_boost > 0) ? (" (Boost: " + evening_boost + "W)") : 0));
@@ -263,7 +275,7 @@ class HeatPumpWWManager {
     }
 
     controlStrategySurplusWarmWater(surplus, excess) {   
-        let evening_boost = this.calculateWarmWaterEveningBoost();
+        let evening_boost = 0; //this.calculateWarmWaterEveningBoost();
         let min_surplus_power = Math.min(surplus.percentile(20), surplus.tail(60).percentile(20)) + evening_boost;
         let max_surplus_power = Math.max(surplus.tail(2*60).percentile(80), min_surplus_power) + evening_boost;
         let min_excess_power = excess.tail(60).percentile(30);
@@ -273,7 +285,7 @@ class HeatPumpWWManager {
             this.setWarmWaterMode(HEATPUMP_MODE.PASSIVE, "warmwater buffering complete");
             this.heatpump.controlWarmWaterPassive(max_surplus_power);
         } else if(this.doStartOpportunisticWarmWaterExcessBuffering(min_excess_power) || 
-           this.canContinueWarmWaterBuffering(max_excess_power)) {
+           this.canContinueExcessWarmWaterBuffering(max_excess_power)) {
             // Opportunistic Buffering if there is excess. To avoid unnecessary heatpump starts,
             // do not stop once there is no more excess but instead eat into surplus.
             this.setWarmWaterMode(HEATPUMP_MODE.BUFFERING, "opportunistic Excess Buffering");

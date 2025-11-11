@@ -5,6 +5,14 @@
   "verbose": false
 }
 -- do not edit previous lines - END --*/
+const ROOM_THERMOSTAT_SETTING = Object.freeze({
+    OFF : 0, 
+    ECO : 1,  
+    COMFORT : 2, 
+    HIGH: 3,  
+    STANDBY : 4
+});
+
 class HeatPumpRoomThermostat {
     constructor(root_obj, heatpump, pv_forecast) {
         this.root_obj = root_obj + ".thermostat";
@@ -18,17 +26,24 @@ class HeatPumpRoomThermostat {
         this.hk2_heating_curve_gradient_obj = 'stiebel-isg.0.settings.HEIZEN.HEIZKREIS 2.val26'; /*Steigung heizkurve*/
         this.hk3_heating_curve_gradient_obj = 'stiebel-isg.0.settings.HEIZEN.HEIZKREIS 3.val10991'; /*Steigung heizkurve*/
 
+        this.setting = undefined;
+        
         this.hk2_room_temp_comfort = 21;
         this.hk2_room_temp_high = 21.6;
         this.hk2_room_temp_eco = 20.6;
         this.hk3_room_temp_comfort = 21.8;
         this.hk3_room_temp_high = 22.8;
         this.hk3_room_temp_eco = 21.4;
+        this.room_temp_off = 15;
         
         this.min_room_overheating_threshold = 0.2;
 
         this.hk2_room_temp_before_deactivation = undefined;
         this.hk3_room_temp_before_deactivation = undefined;
+
+        this.SETTING_OBJ = this.root_obj + ".setting";
+        createState(this.SETTING_OBJ, 0, {read: true, write: false, name: "Thermostat Setting", type: "number", min: 0, max: 4, def: 0, states: {0:'OFF', 1:'ECO', 2:'COMFORT', 3:'HIGH', 4:'STANDBY'}});
+        
     }
 
     estimateHeatingCircuitTemp(room_temp, ambient_temp, gradient) {
@@ -50,7 +65,8 @@ class HeatPumpRoomThermostat {
         return this.heatpump.calculateHeatingBufferMaxFromTarget(target_temp);
     }
     estimateHourlyTemperatureLoss() {
-        const NORM_TEMP_LOSS_PER_HOUR = 0.125; // °C lost per hour at 0°C
+        // Measured: HK2 -0.05K/h @ ~8°C
+        const NORM_TEMP_LOSS_PER_HOUR = 0.11; // °C lost per hour at 0°C
         let ambient_temp = this.stats.getAmbientTemp();
         return Math.max((20 - ambient_temp)/20 * NORM_TEMP_LOSS_PER_HOUR, 0.001);
     }
@@ -60,6 +76,22 @@ class HeatPumpRoomThermostat {
         let min_temp_reserve = Math.min(temp_reserve_hk2, temp_reserve_hk3);
         return min_temp_reserve / this.estimateHourlyTemperatureLoss();
     }
+
+    estimateHourlyWarmupTemperatureGain() {
+        let equilibrium_power = this.heatpump.estimateEquilibriumHeatingOutputPower();
+        let heating_power = this.heatpump.estimateEfficientWarmupOutputPower(this.getEfficientTargetHeatingBufferTemp());
+        let net_power = Math.max(heating_power - equilibrium_power, 0.01);
+        
+        // Auslegung Heizug: 7.8kW @ -10°C - linear interpolation to 0kW @ +20°C 
+        // => ~3kW @ 8°C ~= -0.05K/h measured temp loss w/o heating @ 8°C
+        return (net_power / 3000) * 0.05;
+    }
+    estimateWarmupHoursUntilOverheated() {
+        let temp_gap_hk2 = this.hk2_room_temp_high - this.stats.getRoomTempHk2();
+        let temp_gap_hk3 = this.hk3_room_temp_high - this.stats.getRoomTempHk3();
+        let min_temp_gap = (temp_gap_hk2 + temp_gap_hk3) / 2;
+        return min_temp_gap / this.estimateHourlyWarmupTemperatureGain();
+    }
           
     setRoomTargetTempHigh(reason) {
         if(!this.isRoomTargetTempHigh()) {
@@ -68,6 +100,7 @@ class HeatPumpRoomThermostat {
             console.log("Set Room thermostat to HIGH: " + reason);
             return true;
         }
+        setState(this.SETTING_OBJ, ROOM_THERMOSTAT_SETTING.HIGH, true);
         return false;
     }
     isRoomTargetTempHigh() {
@@ -82,6 +115,7 @@ class HeatPumpRoomThermostat {
             console.log("Set Room thermostat to COMFORT: " + reason);
             return true;
         }
+        setState(this.SETTING_OBJ, ROOM_THERMOSTAT_SETTING.COMFORT, true);
         return false;
     }
     isRoomTargetTempComfort() {
@@ -96,6 +130,7 @@ class HeatPumpRoomThermostat {
             console.log("Set Room thermostat to ECO: " + reason);
             return true;
         }
+        setState(this.SETTING_OBJ, ROOM_THERMOSTAT_SETTING.ECO, true);
         return false;
     }
     isRoomTargetTempEco() {
@@ -103,17 +138,34 @@ class HeatPumpRoomThermostat {
         return hk3_room_temp_target < this.hk3_room_temp_comfort;
     }
 
+    setRoomTargetTempOff(reason) {
+        if(!this.isRoomTargetTempOff()) {
+            setState(this.hk2_room_temp_target_obj, this.room_temp_off, false);
+            setState(this.hk3_room_temp_target_obj, this.room_temp_off, false);
+            console.log("Set Room thermostat to OFF: " + reason);
+            return true;
+        }
+        setState(this.SETTING_OBJ, ROOM_THERMOSTAT_SETTING.OFF, true);
+        return false;
+    }
+    isRoomTargetTempOff() {
+        return this.checkRoomTargetTempMatches(this.hk3_room_temp_target_obj, this.room_temp_off);
+    }
+
     checkRoomTargetTempMatches(obj, match) { return getStateIfExisting(obj, match) == match;}
 
     isHk2RoomOverheated() {
-        let hk2_room_temp = this.stats.getRoomTempHk2();
-        return hk2_room_temp > this.hk2_room_temp_comfort + this.min_room_overheating_threshold;
+        return this.stats.getRoomTempHk2() > this.hk2_room_temp_comfort + this.min_room_overheating_threshold;
     }
     isHk3RoomOverheated() {
-        let hk3_room_temp = this.stats.getRoomTempHk3();
-        return hk3_room_temp > this.hk3_room_temp_comfort + this.min_room_overheating_threshold;
+        return this.stats.getRoomTempHk3() > this.hk3_room_temp_comfort + this.min_room_overheating_threshold;
     }
     areAllRoomsOverheated() { return this.isHk2RoomOverheated() && this.isHk3RoomOverheated();}
+    isAnyRoomOverheated() { return this.isHk2RoomOverheated() || this.isHk3RoomOverheated(); }
+
+    isHk2RoomAtMaxOverheatedTemp() { return this.stats.getRoomTempHk2() >= this.hk2_room_temp_high; }
+    isHk3RoomAtMaxOverheatedTemp() { return this.stats.getRoomTempHk3() >= this.hk3_room_temp_high; }
+    isAnyRoomAtMaxOverheatedTemp() { return this.isHk2RoomAtMaxOverheatedTemp() || this.isHk3RoomAtMaxOverheatedTemp(); }
 
     isHk2RoomAtComfortTemp() { return this.stats.getRoomTempHk2() >= this.hk2_room_temp_comfort; }
     isHk3RoomAtComfortTemp() { return this.stats.getRoomTempHk3() >= this.hk3_room_temp_comfort; }
@@ -124,30 +176,44 @@ class HeatPumpRoomThermostat {
     areAllRoomsUndercooled() { return this.isHk2RoomUndercooled() && this.isHk3RoomUndercooled(); }
     isAnyRoomUndercooled() { return this.isHk2RoomUndercooled() || this.isHk3RoomUndercooled();}
     deactivateHeating() {
-        this.hk2_room_temp_before_deactivation = this.stats.getRoomTempHk2();
-        this.hk3_room_temp_before_deactivation = this.stats.getRoomTempHk3();
+        this.hk2_room_temp_before_deactivation = this.stats.getRawRoomTempHk2();
+        this.hk3_room_temp_before_deactivation = this.stats.getRawRoomTempHk3();
         this.heatpump.setOperatingModeWarmWaterOnly();
+        setState(this.SETTING_OBJ, ROOM_THERMOSTAT_SETTING.STANDBY, true);
     }
     reactivateHeating() {
-        let temp_loss_hk2 = this.stats.getRoomTempHk2() - this.hk2_room_temp_before_deactivation;
-        let temp_loss_hk3 = this.stats.getRoomTempHk3() - this.hk3_room_temp_before_deactivation;
+        let temp_loss_hk2 = this.stats.getRawRoomTempHk2() - this.hk2_room_temp_before_deactivation;
+        let temp_loss_hk3 = this.stats.getRawRoomTempHk3() - this.hk3_room_temp_before_deactivation;
         let secs_in_prev = this.heatpump.resetOperatingMode();
         if(secs_in_prev > 0) {
-            let hourly_temp_loss_hk2 = Math.round(temp_loss_hk2 * 100 / (secs_in_prev/3600))/100;
-            let hourly_temp_loss_hk3 = Math.round(temp_loss_hk3 * 100 / (secs_in_prev/3600))/100;
-            console.log("Reactivated heating. Temperature loss: HK2 = " + temp_loss_hk2 + "K (" + hourly_temp_loss_hk2 + "K/h), HK3 = " + temp_loss_hk3 + "K (" + hourly_temp_loss_hk3 + "K/h)");
+            let hourly_temp_loss_hk2 = Math.round(temp_loss_hk2 * 1000 / (secs_in_prev/3600))/1000;
+            let hourly_temp_loss_hk3 = Math.round(temp_loss_hk3 * 1000 / (secs_in_prev/3600))/1000;
+            console.log("Reactivated heating. Temperature loss: HK2 = " + Math.round(temp_loss_hk2*100)/100 + "K (" + hourly_temp_loss_hk2 + "K/h), HK3 = " + Math.round(temp_loss_hk3*100)/100 + "K (" + hourly_temp_loss_hk3 + "K/h)");
         }
     }
 
-    controlDay(overpowered, heating_mode, min_power, max_power) {
-        this.reactivateHeating();
+    controlHeatingStandbyDay(overpowered, surplus_stop) {
+        let hours_until_undercooled = this.estimateHoursUntilUndercooled();
+        if(overpowered && this.areAllRoomsOverheated() && surplus_stop && hours_until_undercooled > 4) {
+            this.deactivateHeating();
+            return true;
+        } else if(this.heatpump.isOperatingModeWarmWaterOnly()) {
+            if(hours_until_undercooled < 0.75) {
+                this.reactivateHeating();
+            }
+            return true;
+        } else { // Default
+            this.reactivateHeating();
+            return false;
+        }
+    }
 
-        let buffering = heating_mode == HEATPUMP_MODE.BUFFERING;
-        let after_buffering = this.stats.getHeatingBufferTemp() >= this.getEfficientMaxHeatingBufferTemp();
-
+    controlDay(overpowered, min_power, max_power) {
+        let high_buffer = this.stats.getHeatingBufferTemp() >= this.getEfficientMaxHeatingBufferTemp();
+        
         let min_required_heating_power = this.heatpump.getExpectedHeatingPower();
-        let surplus_forecasted_now = this.pv_forecast.upcomingSurplusForecasted(0, min_required_heating_power, 1.2);
-        let surplus_forecasted_soon = this.pv_forecast.upcomingSurplusForecasted(60, min_required_heating_power, 1.2);
+        let surplus_forecasted_now = this.pv_forecast.upcomingSurplusForecasted(0, min_required_heating_power, 1.0);
+        let surplus_forecasted_soon = this.pv_forecast.upcomingSurplusForecasted(60, min_required_heating_power, 1.0);
         let surplus_now = min_power > min_required_heating_power;
         let surplus_start = surplus_forecasted_soon && surplus_forecasted_now && surplus_now; 
 
@@ -155,14 +221,13 @@ class HeatPumpRoomThermostat {
         let remaining_heating_surplus_time = this.pv_forecast.estimateRemainingSurplusToday(expected_heating_power);
         let low_remaining_surplus_forecasted = remaining_heating_surplus_time <= 0;
         let low_surplus_now = max_power < this.heatpump.getExpectedHeatingPower();
-        let is_after_forecasted_peak = (this.pv_forecast.getSecondsAfterPeakTime() > 0);
+        let is_after_forecasted_peak = true; //(this.pv_forecast.getSecondsAfterPeakTime() > 0);
         let surplus_stop = is_after_forecasted_peak && low_remaining_surplus_forecasted && low_surplus_now;
-    
 
-        if(buffering) {
-            return this.setRoomTargetTempEco("Buffering");
-        } else if(after_buffering) {
-            return overpowered ? this.setRoomTargetTempEco("After Buffering") : this.setRoomTargetTempComfort("After Buffering");
+        let standby = this.controlHeatingStandbyDay(overpowered, surplus_stop);
+        if(standby) { return; }
+        if(high_buffer && this.isAnyRoomOverheated()) {
+            return this.setRoomTargetTempEco("After Buffering");
         } else if(surplus_start || (this.isRoomTargetTempHigh() && !surplus_stop)) {
             return this.setRoomTargetTempHigh("Surplus");
         } else {
@@ -170,53 +235,67 @@ class HeatPumpRoomThermostat {
         }
     }
 
-    controlNight(overpowered) {
+    controlHeatingStandbyNight(overpowered) {
         let hours_until_undercooled = this.estimateHoursUntilUndercooled();
         if(overpowered && hours_until_undercooled > 4) {
             this.deactivateHeating();
-            return;
-        } else if(this.heatpump.isOperatingModeWarmWaterOnly() && hours_until_undercooled < 0.75) {
-            this.reactivateHeating();
+            return true;
+        } else if(this.heatpump.isOperatingModeWarmWaterOnly()) {
+            if(hours_until_undercooled < 1) {
+                this.reactivateHeating();
+            }
+            return true;
         }
+        return false;
+    }
+
+    controlNight(overpowered) {
+        let standby = this.controlHeatingStandbyNight(overpowered);
+        if(standby) { return; }
 
         let heating_on = this.heatpump.isHeatingOn() || this.heatpump.isHeatingStartingUp();
         let at_efficient_max = this.stats.getHeatingBufferTemp() >= this.getEfficientMaxHeatingBufferTemp();
-
-        let max_overheat = Math.max(this.getEfficientMaxHeatingBufferTemp() - this.getEfficientTargetHeatingBufferTemp(), 1);
-        let overheat = Math.min(Math.max(this.stats.getHeatingBufferTemp() - this.getEfficientTargetHeatingBufferTemp(), 1), max_overheat);
-        let max_overheat_time = 8*60*60*1000 / overheat; 
-        if(this.DEBUG) { console.log("Efficient Target: " + this.getEfficientTargetHeatingBufferTemp() + "°C, Overheat: " + overheat + "K/" + max_overheat + "K => Max Overheat Time: " + max_overheat_time/(60*1000) + "min"); }
-       /* let within_allowed_overheat_time = isNowInTimePeriod(this.heatpump.getHeatingStartTimeStamp(), max_overheat_time);
-        let above_heating_target = this.stats.getHeatingBufferTemp() > this.heatpump.getTargetHeatingBufferTemp();
-        let above_high_heating_target = this.isRoomTargetTempHigh() && above_heating_target;
-        let within_efficient_heating_limits = true;//within_allowed_overheat_time;// && !above_high_heating_target;*/
+        let within_overheat_burst_time = isNowInTimePeriod(this.heatpump.getHeatingStartTimeStamp(), 2*60*60*1000);
+        let burst_overheating = within_overheat_burst_time && !this.isAnyRoomOverheated();
+        let allowed_to_overheat = this.isAnyRoomUndercooled() || burst_overheating;
+        let morning_break_time = new Date().getHours() >= 7 && new Date().getHours() < 10;
+        let high_surplus = this.pv_forecast.estimateRemainingSurplusToday(this.heatpump.estimateEfficientWarmupInputPower()) > 3;
+        let morning_break = morning_break_time && !this.isAnyRoomUndercooled() && this.estimateHoursUntilUndercooled() > 3 && high_surplus;
 
         if(overpowered) {
-            if(at_efficient_max) {
+            if(morning_break) {
+                return this.setRoomTargetTempOff("Morning Break");
+            } else if(at_efficient_max) {
                 return this.setRoomTargetTempEco("Night Overpowered - Buffer high"); // Restrict energy outflow to slow down buffer outflow
-            } 
-            if(this.isAnyRoomAtComfortTemp() && !this.isAnyRoomUndercooled()) {
-                return this.setRoomTargetTempEco("Night Overpowered - Rooms warm");
+            } else if(heating_on && allowed_to_overheat) {
+                return this.setRoomTargetTempHigh("Night Overpowered - Heating On"); // Increase energy outflow while heating with a low buffer.
             } else {
-                if(heating_on) {
-                    return this.setRoomTargetTempHigh("Night Overpowered - Heating On"); // Increase energy outflow while heating with a low buffer.
-                } else {
-                    return this.setRoomTargetTempEco("Night Overpowered - Stretch heating pause");
-                }
+                return this.setRoomTargetTempEco("Night Overpowered - Stretch heating pause");
             }
         } else {
             return this.setRoomTargetTempComfort("Night Default");
         }
     }
 
-    control(heating_mode, min_power, max_power)  {
+    control(min_power, max_power)  {
         if(this.stats.isInSummerMode()) { return this.setRoomTargetTempComfort(); }
         let overpowered = this.heatpump.isInOverpoweredRegime(this.getEfficientTargetHeatingBufferTemp());
-        if(this.DEBUG) { console.log("Target Heating Buffer Temp: " + this.getEfficientTargetHeatingBufferTemp() + "°C.")}
-        if(this.pv_forecast.isNight()) {
+        let base_power = this.pv_forecast.getBasePowerReserve();
+        let no_pv_power = this.pv_forecast.isNight() || this.pv_forecast.isDawn(base_power) || this.pv_forecast.isDusk(base_power);
+        if(no_pv_power) {
             return this.controlNight(overpowered);
         } else {
-            return this.controlDay(overpowered, heating_mode, min_power, max_power);
+            return this.controlDay(overpowered, min_power, max_power);
+        }
+    }
+    
+
+    reportStatus() {
+        if(this.heatpump.isOperatingModeWarmWaterOnly()) {
+            let hours_until_undercooled = Math.round(10*this.estimateHoursUntilUndercooled())/10;
+            let hk2_temp = Math.round(10*this.stats.getRawRoomTempHk2())/10;
+            let hk3_temp = Math.round(10*this.stats.getRawRoomTempHk3())/10;
+            console.log("Heating STANDBY: " + hours_until_undercooled + "h temperature reserve (HK2=" + hk2_temp + "°C, HK3=" + hk3_temp + "°C)");
         }
     }
 }

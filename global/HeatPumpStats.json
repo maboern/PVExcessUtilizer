@@ -23,6 +23,7 @@ class HeatPumpStats {
         
         this.compressor_starts = 0;
         this.compressor_starts_defrost = 0;
+        this.defrosting = false;
 
         this.HK2_PUMP_OBJ = this.root_obj + ".hk2_pump";
         createState(this.HK2_PUMP_OBJ, false, {read: true, write: false, name: "Pump HK2", type: "boolean", def: false});
@@ -41,7 +42,9 @@ class HeatPumpStats {
     getAmbientTemp() { return this.ambient_temp.debounced(); }
     getWarmWaterTemp() { return this.ww_temp.debounced(); }
     getRoomTempHk2() { return this.hk2_room_temp.debounced(); }
+    getRawRoomTempHk2() { return this.hk2_room_temp.raw(); }
     getRoomTempHk3() { return this.hk3_room_temp.debounced(); }
+    getRawRoomTempHk3() { return this.hk3_room_temp.raw(); }
     getTargetTempHk2() { return this.hk2_target_temp.debounced(); }
     getTargetTempHk3() { return this.hk3_target_temp.debounced(); }
     getRawHeatingBufferTemp() { return this.heating_buffer_temp.debounced(); }
@@ -69,6 +72,15 @@ class HeatPumpStats {
         if(prev_compressor_starts_defrost != 0 && this.compressor_starts_defrost > prev_compressor_starts_defrost) {
             updateDailyStat(this.COMPRESSOR_STARTS_DEFROST, 1);
             console.log("HP: Compressor DEFROST START");
+        }
+    }
+
+    monitorDefrosting() {
+        let prev_defrosting = this.defrosting;
+        this.defrosting = getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.BETRIEBSSTATUS.ABTAUEN', false);
+        if(prev_defrosting != this.defrosting) {
+            let start_stop = this.defrosting ? "START" : "STOP";
+            console.log("HP: DEFROSTING " + start_stop);
         }
     }
 
@@ -107,6 +119,7 @@ class HeatPumpStats {
     
     updateState() {
         this.monitorCompressorStarts();
+        this.monitorDefrosting();
         this.updateCorrectedWarmWaterTemp();
 
         this.ambient_temp.update();

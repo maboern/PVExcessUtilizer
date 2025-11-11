@@ -91,6 +91,15 @@ function historizeDailyStatValue(obj, value) {
     );
 }
 
+function round(value, precision) {
+    let factor = 1/precision;
+    return Math.round(factor*value)/factor;
+}
+
+function limit(min, value, max) {
+    return Math.min(Math.max(value, min), max)
+}
+
 class SignalDebouncer {
     constructor(initial_value, slack) {
         this.value = initial_value;

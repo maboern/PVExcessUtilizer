@@ -34,6 +34,9 @@ class RingBuffer {
         this.clear();
     }
 
+    getLength() { return this.length; }
+    getCount() { return this.count; }
+    isFull() { return this.count >= this.length; }
     clear() {
         this.pointer = 0;
         this.buffer = [];
