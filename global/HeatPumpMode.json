@@ -60,4 +60,21 @@ class HeatPumpMode
                 return DEFAULT_HEATPUMP_EMI_SETTINGS;
         }
     }
+
+    static getCode(mode) {
+        switch(mode) {
+            case HEATPUMP_MODE.PASSIVE:
+                return 0;
+            case HEATPUMP_MODE.EFFICIENT:
+                return 1;
+            case HEATPUMP_MODE.MODULATED:
+                return 2;
+            case HEATPUMP_MODE.BUFFERING:
+                return 3;
+            case HEATPUMP_MODE.WARMUP:
+                return 4;
+            default:
+                return -1;
+        }
+    }
 }

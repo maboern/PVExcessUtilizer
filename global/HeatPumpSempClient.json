@@ -24,6 +24,8 @@ class HeatPumpSempClient {
         this.status_up_to_date = false; // Will bet set to true with first status update
         this.last_status_request_ts = 0;
 
+        this.is_defrosting = false;
+
         this.warmwater_controllable = false;
         this.warmwater_on = false;
         this.warmwater_power = 0;
@@ -79,6 +81,7 @@ class HeatPumpSempClient {
 
     isWarmWaterControllable() { return this.warmwater_controllable; }
     isWarmWaterOn() { return this.warmwater_on; }
+    isWarmWaterRequestedOn() { return this.last_warmwater_request_on; }
     isWarmWaterStartingUp() { return isNowInTimePeriod(this.warmwater_started_ts, this.startup_grace_period); }
     getWarmWaterStartTimeStamp() { return this.warmwater_started_ts; }
     getWarmWaterStopTimeStamp() { return this.warmwater_stopped_ts; }
@@ -92,11 +95,14 @@ class HeatPumpSempClient {
     getHeatingStopTimeStamp() { return this.heating_stopped_ts; }
     getHeatingPower() { return this.heating_power; }
     getHeatingMinPower() { return this.heating_plan ? this.heating_plan_min_power : this.heating_min_power; } 
+    getHeatingPowerFloor() { return this.heating_min_power; }
     getHeatingMaxPower() { return this.heating_plan ? this.heating_plan_max_power : this.heating_max_power; }
     getRequestedHeatingPower() { return this.isLastHeatingRequestStillValid() ? this.last_heating_request_power : 0;}
     isHeatingPlanActive() { return this.heating_plan && this.heating_plan_earliest_start == 0; }
     getHeatingPlanString() { return "Heating Plan: t=" + this.heating_plan_earliest_start + " -> " + this.heating_plan_latest_end + ", P=" + this.heating_plan_min_power + "W - " + this.heating_plan_max_power + "W, E=" + this.heating_plan_min_energy + "Wh - " + this.heating_plan_max_energy + "Wh"; }
 
+    setDefrosting(on) {  this.is_defrosting = on;  }
+    
     processWarmWaterStatusUpdate(status) {
         let warmwater_was_on = this.warmwater_on;
         this.warmwater_controllable = status.Device2EM.DeviceStatus[0].EMSignalsAccepted == "true"; 
@@ -152,6 +158,8 @@ class HeatPumpSempClient {
         this.processHeatingStatusUpdate(status);
 
         this.filterHeatpumpStartupPower();
+        this.filterHeatpumpShutdownPower();
+        this.filterHeatpumpDefrosting();
 
         let plannings = status.Device2EM.PlanningRequest ? status.Device2EM.PlanningRequest.Timeframe : null;
         this.processPlanningUpdates(plannings);
@@ -216,17 +224,31 @@ class HeatPumpSempClient {
         const SHUTDOWN_GRACE_PERIOD = 2*60*1000; // The power reading is unreliable after shutting off.
         const DEFAULT_SHUTDOWN_POWER = 0;
 
-        if(isNowInTimePeriod(this.warmwater_stopped_ts, SHUTDOWN_GRACE_PERIOD)) {
+        if(isNowInTimePeriod(this.warmwater_stopped_ts, SHUTDOWN_GRACE_PERIOD) && !this.isHeatingOn()) {
             this.warmwater_power = DEFAULT_SHUTDOWN_POWER;
         }
-        if(isNowInTimePeriod(this.heating_stopped_ts, SHUTDOWN_GRACE_PERIOD)) {
+        if(isNowInTimePeriod(this.heating_stopped_ts, SHUTDOWN_GRACE_PERIOD) && !this.isWarmWaterOn()) {
             this.heating_power = DEFAULT_SHUTDOWN_POWER;
+        }
+    }
+
+    filterHeatpumpDefrosting() {
+        const DEFAULT_DEFROSTING_POWER = 600;
+
+        if(this.is_defrosting) {
+            if(this.isHeatingOn()) {
+                this.heating_power = DEFAULT_DEFROSTING_POWER;
+            } else if(this.isWarmWaterOn()) {
+                this.warmwater_power = DEFAULT_DEFROSTING_POWER;
+            } else {
+                console.log("Heatpump is Defrosting but neither Warmwater nor Heating is on!");
+            }
         }
     }
 
     canReRequest(last_ts) { return (Date.now() >= last_ts + this.max_request_interval_s*1000); }
 
-    isLastRequestStillValid(last_ts) { return (Date.now() >= last_ts + (this.max_request_interval_s + 30)*1000);}
+    isLastRequestStillValid(last_ts) { return (Date.now() < last_ts + (this.max_request_interval_s + 30)*1000);}
     isLastHeatingRequestStillValid() { return this.isLastRequestStillValid(this.last_heating_request_ts); }
 
     requestWarmWater(on, force) {

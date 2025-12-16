@@ -22,6 +22,7 @@ class PVForecastRange {
     getUpper() { return this.upper; }
     setUpper(val) { this.upper = val; }
     multiply(factor) { this.estimate *= factor; this.lower*=factor; this.upper*=factor; return this;}
+    dampen(factor) { this.estimate *= factor; this.lower*=factor; return this;}
 
     static resample(prev_sample, next_sample, fraction) {
         let estimate = next_sample.getEstimate() * fraction + prev_sample.getEstimate() * (1 - fraction);

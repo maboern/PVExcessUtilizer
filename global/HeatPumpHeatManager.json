@@ -17,8 +17,11 @@ class HeatPumpHeatManager {
         this.heating_mode = HEATPUMP_MODE.PASSIVE;
         this.remaining_heating_surplus_time = 0;
         
+        this.HEAT_MODE = this.root_obj + ".heat_mode";
+        createState(this.HEAT_MODE, 0, {read: true, write: false, name: "Heating Mode", type: "number", min: -1, max: 4, def: 0, states: {0:'PASSIVE', 1:'MODULATED', 2:'EFFICIENT', 3:'BUFFERING', 4:'WARMUP'}});
+
         this.updateState();
-        setTimeout(() => this.reportStatus(), 5000);
+        setTimeout(() => this.updateHourly(), 5000);
     }
 
     getCurrentPower() { return this.heatpump.getCurrentHeatingPower(); }
@@ -26,6 +29,7 @@ class HeatPumpHeatManager {
     setHeatingMode(new_mode, reason) {
         if(new_mode != this.heating_mode) {
             this.heating_mode = new_mode;
+            setState(this.HEAT_MODE, HeatPumpMode.getCode(this.heating_mode), true);
             this.resetHeatingBufferMax();
             let reason_suffix = '.';
             if(reason) { reason_suffix = " because of " + reason + "."; }
@@ -45,18 +49,21 @@ class HeatPumpHeatManager {
             status += ", Warmup = " + round(this.thermostat.estimateWarmupHoursUntilOverheated(), 0.1) + "h";
 		    status += " | SURPLUS: " + this.remaining_heating_surplus_time + "m";
 			console.log(status);
-            this.thermostat.reportStatus();
             this.heatpump.reportStatus();
         }
     }
 
-    updateHourly() {this.reportStatus();}
+    updateHourly() {
+        this.thermostat.updateHourly();
+        if(this.heatpump.isHeatingControllable()) { this.reportStatus(); }
+    }
     
     doStartHeatingSurplusBufferingNow(min_power) { 
 		let surplus_forecasted = this.pv_forecast.upcomingSurplusForecasted(30,  this.heatpump.getExpectedHeatingPower(), 1);
         let surplus_now = min_power > this.heatpump.getMinHeatingPower();
         if(surplus_forecasted && surplus_now) {
-            let time_to_start = this.remaining_heating_surplus_time < this.heatpump.getRequiredHeatingRunTimeToMaxBuffer();
+            let required_time = Math.max(this.heatpump.getRequiredHeatingRunTimeToMaxBuffer(), 2*60); // Cannot sustain more than 2h of buffering
+            let time_to_start = this.remaining_heating_surplus_time < required_time;
             let necessary_to_start = this.stats.getHeatingBufferTemp() <= DEFAULT_HEATPUMP_EMI_SETTINGS.getHeatingBufferTemp();
             let heat_consumption_low = true; //this.thermostat.areAllRoomsOverheated();
             return isAfternoon() && time_to_start && necessary_to_start && heat_consumption_low; 
@@ -84,8 +91,8 @@ class HeatPumpHeatManager {
         let time_to_overheat = this.thermostat.estimateWarmupHoursUntilOverheated()*60;
         let time_to_start = this.remaining_heating_surplus_time < time_to_overheat;
         let not_overheated = !this.thermostat.isAnyRoomAtMaxOverheatedTemp();
-        let buffer_low = this.heatpump.getHeatingBufferTempOvershoot() < 0;
-        return time_to_start && not_overheated && buffer_low;
+        let buffer_not_high = !this.heatpump.isHeatingBufferTempAtEfficientMax();
+        return time_to_start && not_overheated && buffer_not_high;
     }
 
     controlHeating(surplus, excess) {
@@ -137,7 +144,8 @@ class HeatPumpHeatManager {
     }
 
     updateState() {
-        let target_heating_temp = this.heatpump.getTargetHeatingBufferTemp();
+        let target_heating_temp = this.thermostat.getEfficientTargetHeatingBufferTemp();
+        this.heatpump.setEquilibriumHeatingBufferTarget(target_heating_temp);
         this.remaining_heating_surplus_time = this.pv_forecast.estimateRemainingSurplusToday(this.heatpump.estimateExpectedHeatingPower(target_heating_temp));
     }
     

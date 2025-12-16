@@ -165,7 +165,7 @@ class PVForecast {
             let fading = Math.max(1 - (time_to_forecast/fading_time), 0);
             fog_correction = 1 - (this.fog_thickness * fading);
         }
-        return this.getUncorrectedForecastRange(datetime).multiply(fog_correction);
+        return this.getUncorrectedForecastRange(datetime).dampen(fog_correction);
     }
     getUncorrectedForecastRange(datetime) {
         let hour = datetime.getHours();
@@ -227,8 +227,9 @@ class PVForecast {
             let fog = 1 - measurement / forecast.getEstimate();
             fog_thickness = smooth(fog_thickness, fog, 0.3);
         }
+        let prev_fog_thickness = this.fog_thickness;
         this.fog_thickness = Math.max(fog_thickness, 0);
-        console.log("Detected Fog Thickness: " + Math.round(this.fog_thickness*100) + "%")
+        if(Math.abs(prev_fog_thickness - this.fog_thickness) >= 5) { console.log("Detected Fog Thickness: " + Math.round(this.fog_thickness*100) + "%"); }
     }
 
     parseApiData(json) {

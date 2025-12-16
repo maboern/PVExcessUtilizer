@@ -106,9 +106,9 @@ function calculateDisposableLoadPower() {
 function validateRunning() {
     let non_controlled_consumption = pv.getRecentTotalConsumptionMeasurements().tail(10).percentile(50) - pv.getControllableLoadPower();
     non_controlled_consumption_smoothed = smooth(non_controlled_consumption_smoothed, non_controlled_consumption, 0.25);
-    if(non_controlled_consumption_smoothed < 0) 
+    if(non_controlled_consumption_smoothed < 0 && non_controlled_consumption < 0) 
     {
-        console.log("Negative remaining non-controlled consumption: " + non_controlled_consumption_smoothed + "! (Total Consumption: " + pv.getTotalConsumption() + ", Loads: " + pv.getControllableLoadPower() + ")");
+        console.log("Negative remaining non-controlled consumption: " + Math.round(non_controlled_consumption) + "W/~" + Math.round(non_controlled_consumption_smoothed) + "W! (Total Consumption: " + pv.getTotalConsumption() + ", Loads: " + pv.getControllableLoadPower() + ")");
     }
     boiler.validateRunning(non_controlled_consumption_smoothed);
     jackery.validateRunning(non_controlled_consumption_smoothed);
@@ -122,9 +122,6 @@ function updateLoadControl(min_available_power, max_available_power)
     heatpump.updateState();
     heatpump_ww_mgr.control(pv.getRecentAvailableSurplusPowerMeasurements(), pv.getRecentAvailableExcessPowerMeasurements());
     heatpump_heat_mgr.control(pv.getRecentAvailableSurplusPowerMeasurements(), pv.getRecentAvailableExcessPowerMeasurements());
-
-    // TODO: Calculate Confidence Level from Generation Nowcast (Power - Forecast)
-    // and Consumption Forecast (SEMP / maybe Statistics)
 
     // The order here defines load priority
     boiler.control(SCRIPT_UPDATE_INTERVAL_SEC, min_available_power, max_available_power);
@@ -202,7 +199,8 @@ function hourly() {
     heatpump_ww_mgr.updateHourly();
     heatpump_heat_mgr.updateHourly();
 }
-schedule('{"time":{"start":"sunrise","end":"sunset","mode":"hours","interval":1},"period":{"days":1}}', hourly);
+schedule('{"time":{"start":"00:00","end":"24:00","mode":"hours","interval":1},"period":{"days":1}}', hourly);
+//schedule('{"time":{"start":"sunrise","end":"sunset","mode":"hours","interval":1},"period":{"days":1}}', hourly);
 
 var ControlInterval = setInterval(function () {
     updateControl(); // start processing in interval

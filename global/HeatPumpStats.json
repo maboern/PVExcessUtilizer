@@ -58,7 +58,16 @@ class HeatPumpStats {
     isHk2MixerClosing() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.MISCHER_ZU_HEIZKREIS_2', false); }
     isHk3MixerOpening() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.MISCHER_AUF_HEIZKREIS_3', false); }
     isHk3MixerClosing() { return getStateIfExisting('stiebel-isg.0.info.STATUSANLAGE.STATUS_ANLAGE.MISCHER_ZU_HEIZKREIS_3', false); }
+    isDefrosting() { return this.defrosting; }
 
+    getWarmWaterOutputPower() {
+        if(this.isInSummerMode()) {
+            return 1000 * getStateIfExisting('stiebel-isg.0.settings.WARMWASSER.WW LEISTUNG WP.val1126', 5);
+        } else {
+            return 1000 * getStateIfExisting('stiebel-isg.0.settings.WARMWASSER.WW LEISTUNG WP.val1127', 5);
+        }
+    }
+    
     monitorCompressorStarts() {
         let prev_compressor_starts = this.compressor_starts;
         this.compressor_starts = getStateIfExisting('stiebel-isg.0.info.WAERMEPUMPE.STARTS.VERDICHTER', this.compressor_starts);
@@ -82,6 +91,7 @@ class HeatPumpStats {
             let start_stop = this.defrosting ? "START" : "STOP";
             console.log("HP: DEFROSTING " + start_stop);
         }
+        this.semp_client.setDefrosting(this.defrosting);
     }
 
     trackHkMixerMovements() {
